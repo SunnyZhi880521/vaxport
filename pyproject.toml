@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vaxport"
+version = "1.2.0"
+description = "疫苗企业本地 LLM 数据分析终端工具"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=1.0",
+    "psycopg2-binary>=2.9",
+    "rich>=13.0",
+    "textual>=0.52",
+    "pyyaml>=6.0",
+    "tiktoken>=0.5",
+    "jinja2>=3.0",
+    "matplotlib>=3.7",
+    "dashscope>=1.20",
+    "sqlparse>=0.5.0",
+]
+license = {text = "MIT"}
+authors = [
+    {name = "Sunny", email = "sunny@example.com"},
+]
+readme = "README.md"
+
+[project.scripts]
+vaxport = "vaxport.cli:main"
+vaxport-tui = "vaxport.cli:main"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vaxport = ["skills/**/*"]

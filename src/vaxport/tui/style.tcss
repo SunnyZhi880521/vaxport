@@ -1,0 +1,371 @@
+/*
+ * vaxport textual TUI 样式 — Toad 风格
+ * Dracula 主题色系，克制边框/间距
+ */
+
+/* ── CSS 变量 ── */
+Screen {
+    background: #282A36;
+    color: #F8F8F2;
+}
+
+/* ── 水平主容器 ── */
+Horizontal {
+    background: #282A36;
+}
+
+/* ── 左侧主区域 ── */
+#main-area {
+    width: 3fr;
+    background: #282A36;
+}
+
+/* ── 对话区：滚动容器 ── */
+#conversation {
+    height: 1fr;
+    background: #282A36;
+    scrollbar-size-vertical: 2;
+    scrollbar-color: #6272A4;
+    scrollbar-background: #21222C;
+    padding: 0 1;
+}
+
+/* ── Agent 状态栏（固定于对话区下方）── */
+#agent-status {
+    height: 1;
+    padding: 0 1;
+    color: #BD93F9;
+    background: #21222C;
+    text-style: italic;
+}
+
+/* ── 对话区内的用户消息 ── */
+.user-message {
+    color: #BD93F9;
+    margin: 1 0 0 1;
+    padding: 0 1;
+    height: auto;
+}
+
+/* ── 对话区内的 Agent 回复 Markdown ── */
+#conversation Markdown {
+    layout: stream;
+    width: 100%;
+    margin: 0 0 0 1;
+    padding: 0 1 0 1;
+    height: auto;
+    min-height: 0;
+}
+
+/* ── 思考过程/规划内容 Markdown（降级展示）── */
+#conversation Markdown.thinking-content {
+    color: #8888A0;
+    margin: 0 0 0 1;
+    padding: 0 1 0 2;
+    border-left: solid #44475A;
+}
+
+#conversation Markdown.thinking-content MarkdownBlock {
+    color: #8888A0;
+    margin: 0 0 0 0;
+    padding: 0 0;
+    height: auto;
+    min-height: 0;
+}
+
+/* ── Markdown 内部 block 间距 ── */
+#conversation Markdown MarkdownBlock {
+    margin: 0 0 0 0;
+    padding: 0 0;
+    height: auto;
+    min-height: 0;
+}
+
+/* ── Markdown 表格间距优化（覆盖 Textual 默认值） ── */
+#conversation Markdown MarkdownTable {
+    margin: 0 0;
+}
+
+#conversation Markdown MarkdownTableContent {
+    grid-gutter: 0 1;
+}
+
+/* ── 对话区内的工具调用行 ── */
+.tool-call-line {
+    color: #6272A4;
+    margin: 0 1 0 2;
+    height: auto;
+    min-height: 1;
+}
+
+.tool-summary-line {
+    color: #6272A4;
+    margin: 0 1 0 2;
+    height: auto;
+}
+
+.tool-detail-line {
+    color: #6272A4;
+    margin: 0 1 0 2;
+    height: auto;
+}
+
+/* ── 对话区内的 Loading 行 ── */
+.loading-line {
+    color: #6272A4;
+    margin: 0 1 0 1;
+    height: auto;
+}
+
+/* ── 进度点 ── */
+#progress-dots {
+    color: #6272A4;
+    height: 1;
+    margin: 0 1 0 1;
+}
+
+/* ── 轮次间隔分隔线 ── */
+.divider {
+    color: #44475A;
+    height: 2;
+    margin: 0 1 0 1;
+}
+
+/* ── 输入区域 ── */
+#prompt-container {
+    height: auto;
+    min-height: 4;
+    max-height: 12;
+    margin: 1 1 0 1;
+    padding: 0 0;
+    background: #21222C;
+    border: tall #44475A;
+}
+
+#prompt-container:focus-within {
+    border: tall #BD93F9;
+}
+
+#prompt-info {
+    height: 1;
+    padding: 0 1;
+    color: #6272A4;
+    background: transparent;
+}
+
+#user_input {
+    height: auto;
+    min-height: 3;
+    padding: 0 1;
+    background: transparent;
+    border: none;
+    color: #F8F8F2;
+}
+
+#user_input:focus {
+    border: none;
+    background: transparent;
+}
+
+#user_input > .text-area--gutter {
+    display: none;
+}
+
+/* ── 头部栏 ── */
+#header-bar {
+    height: 1;
+    padding: 0 2;
+    background: #21222C;
+    color: #6272A4;
+}
+
+/* ── 右侧侧边栏 ── */
+#sidebar {
+    width: 1fr;
+    min-width: 26;
+    max-width: 36;
+    background: #21222C;
+    border-left: solid #44475A;
+}
+
+#sidebar-header {
+    height: 1;
+    padding: 0 1;
+    background: transparent;
+    color: #6272A4;
+    text-style: bold;
+}
+
+#sidebar-content {
+    height: 1fr;
+    max-height: 100%;
+    padding: 0 1;
+    background: #21222C;
+    scrollbar-size-vertical: 1;
+}
+
+/* ── 快捷键面板 ── */
+
+#shortcuts-panel {
+    height: auto;
+    min-height: 1;
+    padding: 1 1;
+    background: #21222C;
+    color: #6272A4;
+}
+
+#sidebar-content Tree {
+    background: #21222C;
+}
+
+#sidebar-content Tree > .tree--guides {
+    color: #44475A;
+}
+
+#sidebar-content Tree > .tree--label {
+    color: #A4A4B4;
+}
+
+#sidebar-content Tree > .tree--label:hover {
+    background: #383A4A;
+}
+
+#sidebar-content Tree > .tree--cursor {
+    background: #383A4A;
+}
+
+/* ── Ctrl+P 模型选择器弹窗 ── */
+ModelPickerScreen {
+    background: #000000 40%;
+    align: center middle;
+}
+
+#picker-container {
+    width: 50;
+    max-height: 24;
+    background: #21222C;
+    border: solid #BD93F9;
+    padding: 0 0;
+}
+
+#picker-title {
+    height: 1;
+    padding: 0 2;
+    background: #282A36;
+    color: #6272A4;
+    text-style: bold;
+}
+
+#picker-list {
+    height: 1fr;
+    padding: 0 0;
+    background: #21222C;
+    color: #F8F8F2;
+}
+
+#picker-list > .option-list--option {
+    padding: 0 2;
+    color: #A4A4B4;
+    background: #21222C;
+}
+
+#picker-list > .option-list--option.--highlight {
+    background: #44475A;
+    color: #F8F8F2;
+}
+
+#picker-list > .option-list--option.--disabled {
+    color: #BD93F9;
+    text-style: bold;
+    background: #21222C;
+}
+
+/* ── VerticalScroll 通用 ── */
+VerticalScroll {
+    background: #282A36;
+    scrollbar-color: #6272A4;
+    scrollbar-background: #21222C;
+}
+
+/* ── 决策选择器弹窗 ── */
+DecisionPickerScreen {
+    background: #000000 40%;
+    align: center middle;
+}
+
+#decision-container {
+    width: 56;
+    max-height: 28;
+    background: #21222C;
+    border: solid #BD93F9;
+    padding: 0 0;
+}
+
+#decision-title {
+    height: 1;
+    padding: 0 2;
+    background: #282A36;
+    color: #6272A4;
+    text-style: bold;
+}
+
+#decision-question {
+    height: auto;
+    min-height: 3;
+    padding: 1 2;
+    color: #F8F8F2;
+    background: #21222C;
+}
+
+#decision-list {
+    height: 1fr;
+    padding: 0 0;
+    background: #21222C;
+    color: #F8F8F2;
+}
+
+#decision-list > .option-list--option {
+    padding: 1 2;
+    color: #A4A4B4;
+    background: #21222C;
+}
+
+#decision-list > .option-list--option.--highlight {
+    background: #44475A;
+    color: #F8F8F2;
+}
+
+/* ── 自定义输入弹窗 ── */
+CustomInputModal {
+    background: #000000 40%;
+    align: center middle;
+}
+
+#custom-input-container {
+    width: 50;
+    height: auto;
+    background: #21222C;
+    border: solid #FFB86C;
+    padding: 0 0;
+}
+
+#custom-input-title {
+    height: 1;
+    padding: 0 2;
+    background: #282A36;
+    color: #FFB86C;
+    text-style: bold;
+}
+
+#custom-input-field {
+    height: 3;
+    margin: 1;
+    padding: 0 1;
+    background: #282A36;
+    border: solid #44475A;
+    color: #F8F8F2;
+}
+
+#custom-input-field:focus {
+    border: solid #FFB86C;
+}

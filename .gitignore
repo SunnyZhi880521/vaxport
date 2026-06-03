@@ -21,7 +21,6 @@ Thumbs.db
 # Project specific
 *.log
 ~/.vaxport/
-myappdb_full.dump
 
 # Claude Code
 .claude/

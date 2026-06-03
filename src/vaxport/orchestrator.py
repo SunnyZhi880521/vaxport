@@ -455,7 +455,7 @@ class Orchestrator:
                  config: Config,
                  max_rounds: int = 100,
                  total_timeout: int = 0,
-                 auto_plan: bool = True, plan_confirm: bool = True,
+                 auto_plan: bool = True, plan_confirm: bool = False,
                  auto_review: bool = True):
         self._config = config
         self._llm = llm_client
@@ -480,7 +480,8 @@ class Orchestrator:
                              tool_filter=_make_filter("general"),
                              auto_plan=False, plan_confirm=False,
                              auto_review=False,
-                             preferred_model=config.get_agent_model("general")),
+                             preferred_model=config.get_agent_model("general"),
+                             temperature=config.get_agent_temperature("general")),
             "analyze_reporter": Agent(llm_client, tool_registry,
                                       max_rounds=max_rounds,
                                       total_timeout=total_timeout,
@@ -488,7 +489,8 @@ class Orchestrator:
                                       tool_filter=_make_filter("analyze_reporter"),
                                       auto_plan=auto_plan, plan_confirm=plan_confirm,
                                       auto_review=auto_review,
-                                      preferred_model=config.get_agent_model("analyze_reporter")),
+                                      preferred_model=config.get_agent_model("analyze_reporter"),
+                                      temperature=config.get_agent_temperature("analyze_reporter")),
             "quality_supervision": Agent(llm_client, tool_registry,
                                          max_rounds=max_rounds,
                                          total_timeout=total_timeout,
@@ -496,7 +498,8 @@ class Orchestrator:
                                          tool_filter=_make_filter("quality_supervision"),
                                          auto_plan=auto_plan, plan_confirm=plan_confirm,
                                          auto_review=auto_review,
-                                         preferred_model=config.get_agent_model("quality_supervision")),
+                                         preferred_model=config.get_agent_model("quality_supervision"),
+                                         temperature=config.get_agent_temperature("quality_supervision")),
             "document_search": Agent(llm_client, tool_registry,
                                      max_rounds=max_rounds,
                                      total_timeout=total_timeout,
@@ -504,7 +507,8 @@ class Orchestrator:
                                      tool_filter=_make_filter("document_search"),
                                      auto_plan=auto_plan, plan_confirm=plan_confirm,
                                      auto_review=auto_review,
-                                     preferred_model=config.get_agent_model("document_search")),
+                                     preferred_model=config.get_agent_model("document_search"),
+                                     temperature=config.get_agent_temperature("document_search")),
         }
         self._executor = ConcurrentExecutor(max_workers=5)
         self._handoff_max_hops = 2  # 最大 handoff 跳数
@@ -689,7 +693,7 @@ class Orchestrator:
 
         # EAR Feedback Loop: 记录轨迹和路由决策
         duration = time.time() - start_time
-        success = "error" not in result and result.get("answer")
+        success = "error" not in result and bool(result.get("answer")) and "已取消" not in str(result.get("answer", "")) and "超时" not in str(result.get("answer", "")) and "失败" not in str(result.get("answer", "")) and "中断" not in str(result.get("answer", ""))
         try:
             # 记录轨迹
             self._feedback_loop.log_trajectory(TrajectoryRecord(
@@ -776,3 +780,9 @@ class Orchestrator:
         agent = self._agents.get(agent_name)
         if agent:
             agent.preferred_model = model_id
+
+    def update_agent_temperature(self, agent_name: str, temperature: float):
+        """动态更新指定 Agent 的 temperature。"""
+        agent = self._agents.get(agent_name)
+        if agent:
+            agent.temperature = temperature

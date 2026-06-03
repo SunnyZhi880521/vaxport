@@ -33,12 +33,14 @@ DEFAULT_CONFIG = {
     },
     "agent": {
         "max_tool_rounds": 100,
+        "total_timeout": 600,  # 总执行超时（秒），0=不限制
         "session_dir": "~/.vaxport/sessions",
         "primary_backend": "aliyun",
         "export_dir": "",
         "auto_plan": True,
-        "plan_confirm": True,
+        "plan_confirm": False,
         "auto_review": True,
+        "agent_temperatures": {},  # {"task_assigner": 0.0, "general": 0.1, "analyze_reporter": 0.3, ...}
         "agent_models": {},  # {"task_assigner": "deepseek-v4-pro", "analyze_reporter": "deepseek-v4-pro", ...}
     },
 }
@@ -169,6 +171,10 @@ class Config:
         return self._data["agent"]["max_tool_rounds"]
 
     @property
+    def total_timeout(self) -> int:
+        return self._data["agent"].get("total_timeout", 0)
+
+    @property
     def session_dir(self) -> Path:
         return Path(self._data["agent"]["session_dir"]).expanduser()
 
@@ -194,6 +200,21 @@ class Config:
     @property
     def auto_review(self) -> bool:
         return self._data["agent"].get("auto_review", True)
+
+    @property
+    def agent_temperatures(self) -> dict:
+        return self._data["agent"].get("agent_temperatures", {})
+
+    def get_agent_temperature(self, agent_name: str) -> float:
+        """获取指定 Agent 的 temperature，未配置返回全局默认 0.1"""
+        return self.agent_temperatures.get(agent_name, 0.1)
+
+    def set_agent_temperature(self, agent_name: str, temperature: float):
+        """设置 Agent 的 temperature"""
+        if "agent_temperatures" not in self._data["agent"]:
+            self._data["agent"]["agent_temperatures"] = {}
+        self._data["agent"]["agent_temperatures"][agent_name] = temperature
+        self.save()
 
     @property
     def agent_models(self) -> dict:

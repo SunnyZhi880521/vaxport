@@ -22,6 +22,114 @@ from vaxport.llm import LLMClient
 from vaxport.tools import ToolRegistry
 
 
+def _levenshtein_distance(s1: str, s2: str) -> int:
+    """计算两个字符串的编辑距离（Levenshtein distance）"""
+    if len(s1) < len(s2):
+        return _levenshtein_distance(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+
+    return previous_row[-1]
+
+
+def _string_similarity(s1: str, s2: str) -> float:
+    """计算两个字符串的相似度（0.0~1.0），1.0 表示完全相同"""
+    if not isinstance(s1, str) or not isinstance(s2, str):
+        return 0.0
+    if s1 == s2:
+        return 1.0
+    if not s1 or not s2:
+        return 0.0
+
+    max_len = max(len(s1), len(s2))
+    distance = _levenshtein_distance(s1, s2)
+    return 1.0 - (distance / max_len)
+
+
+def _value_similarity(v1, v2) -> float:
+    """计算两个值的相似度（0.0~1.0），支持字符串和数值"""
+    if v1 == v2:
+        return 1.0
+
+    # 字符串比较
+    if isinstance(v1, str) and isinstance(v2, str):
+        return _string_similarity(v1, v2)
+
+    # 数值比较
+    if isinstance(v1, (int, float)) and isinstance(v2, (int, float)):
+        if v1 == 0 and v2 == 0:
+            return 1.0
+        if v1 == 0 or v2 == 0:
+            return 0.0
+        # 相对差：|v1 - v2| / max(|v1|, |v2|)
+        relative_diff = abs(v1 - v2) / max(abs(v1), abs(v2))
+        return 1.0 - relative_diff
+
+    # 其他类型不匹配
+    return 0.0
+
+
+def _args_similarity(args1: dict, args2: dict) -> float:
+    """计算两个参数集的相似度（0.0~1.0）"""
+    if not isinstance(args1, dict) or not isinstance(args2, dict):
+        return 0.0
+
+    keys1 = set(args1.keys())
+    keys2 = set(args2.keys())
+
+    if keys1 != keys2:
+        return 0.0  # 参数键不同，认为不相似
+
+    if not keys1:
+        return 1.0  # 都为空
+
+    similarities = []
+    for key in keys1:
+        sim = _value_similarity(args1.get(key), args2.get(key))
+        similarities.append(sim)
+
+    return sum(similarities) / len(similarities)
+
+
+def _is_diverse_batch(tool_name: str, recent_calls: list[tuple[str, dict]], threshold: float = 0.6) -> bool:
+    """判断近期调用是否为多样化的批处理（如对比多个菌株）
+
+    返回 True 表示参数值多样化，应视为合法批处理，不应触发死循环检测
+    """
+    # 提取同工具的参数值
+    same_tool_calls = [args for name, args in recent_calls if name == tool_name]
+
+    if len(same_tool_calls) < 2:
+        return False
+
+    # 计算所有两两调用的平均相似度
+    total_sim = 0.0
+    count = 0
+    for i in range(len(same_tool_calls)):
+        for j in range(i + 1, len(same_tool_calls)):
+            sim = _args_similarity(same_tool_calls[i], same_tool_calls[j])
+            total_sim += sim
+            count += 1
+
+    if count == 0:
+        return False
+
+    avg_similarity = total_sim / count
+
+    # 如果平均相似度低于阈值，说明参数值多样化
+    return avg_similarity < threshold
+
+
 class ProgressCallbacks:
     """Agent 执行进度回调 — 供 CLI 层注入 UI 反馈"""
 
@@ -67,6 +175,10 @@ class ProgressCallbacks:
         """规划阶段流式文本块"""
         pass
 
+    def on_chart(self, file_path: str):
+        """图表生成完成，传递文件路径"""
+        pass
+
     def on_plan(self, plan_text: str) -> bool:
         """PRE-HOOK: 返回 True 继续执行，False 取消。
         默认自动确认，子类可覆盖实现用户交互。"""
@@ -84,11 +196,21 @@ class AgentLoopState:
         self._last_tool_call_sig: tuple = None
         self._consecutive_same_count: int = 0
         self.compression_count = 0  # 压缩次数
+        self._tool_result_cache: dict[str, str] = {}  # (tool_name, args_json) → result
+        self._all_tool_calls_summary: list[dict] = []  # 已调用工具摘要列表
+        self._recent_tool_params: list[tuple[str, dict]] = []  # [(tool_name, parsed_args), ...] 最近 N 次调用
 
 
 PLAN_PROMPT = """## 规划阶段（不可调用工具）
 
-你是任务规划专家。请严格按以下模板分析用户问题并输出执行计划：
+你是任务规划专家。请严格按以下模板分析用户问题并输出执行计划。
+
+**重要原则**：
+1. 当存在多种分析方案或参数选择时，直接选择最优方案执行，无需等待用户确认。选择依据：
+   - 数据完整性：优先选择能覆盖完整数据的方案
+   - 分析深度：优先选择能提供更深入洞察的方案
+   - 可视化效果：优先选择最直观清晰的展示方式
+2. **禁止输出确认语句**：不要在规划末尾添加"确认以上计划后，我将立即执行"、"请确认后开始执行"等任何确认提示语。规划输出后立即自动执行。
 
 ### 一、任务理解
 [用一句话概括用户需求]
@@ -104,10 +226,10 @@ PLAN_PROMPT = """## 规划阶段（不可调用工具）
 | 1 | 查询 | query_xxx | date=2024 | 50行 |
 | 2 | 统计 | run_statistics | basic_stats | 均值/标准差 |
 
-### 四、输出章节（必须从"一"开始连续编号）
+### 四、输出章节（根据任务复杂度确定章节数量，从"一"开始连续编号，简单任务 2-3 章，复杂分析 5-7 章或更多）
 - ## 一、[标题]
 - ## 二、[标题]
-- ...
+- （根据实际需要继续增加章节，不要限制数量）
 
 ### 五、可视化需求
 | 图表类型 | 数据来源 | 用途 |
@@ -116,22 +238,6 @@ PLAN_PROMPT = """## 规划阶段（不可调用工具）
 
 ### 六、风险点
 - [可能遇到的问题及应对]
-
-### 七、待用户决策/澄清的关键事项
-
-对于分析中依赖主观判断的参数（如风险评分权重、阈值定义、分类标准等），列出待决策事项，按推荐度排序。
-
-**需澄清**（信息不明确但可用默认值推进）：
-- 🏷️ 澄清: [问题描述]
-  → 默认方案: [默认值及理由]
-  → 如需调整请在确认时说明
-
-**需决策**（多方案选择）：
-- 🥇 [方案A — 推荐]: [描述] — 为什么推荐
-- 🥈 [方案B]: [描述] — 优缺点
-- 🥉 [方案C]: [描述] — 优缺点
-
-如无则写"无需用户决策，按默认规则执行"。
 
 ## 对话连续性判断（最优先，在输出计划前判断）
 
@@ -198,14 +304,19 @@ FIX_PROMPT = """## 自动修复阶段（可调用工具）
    - 将过滤查询结果与完整时间段合并，缺失月份补零
    - 如有图表，用包含零值的完整数据重新调用 generate_chart（趋势图必须覆盖所有月份，零值月份也要在 X 轴上显示）
    - 删除答案中所有"建议查询更多数据""建议用户补充""需更多数据验证"等表述，改为实际数据结论
-1. **图表路径问题**：如 Markdown 图片引用 ![...](file_path) 中的路径为占位符 "file_path" 而非实际路径，请重新调用 generate_chart 生成图表（根据上下文推断图表类型和数据），并**严格使用返回 JSON 中的 file_path 字段值**替换占位符。**禁止对路径做任何修改：禁止添加/删除前缀、禁止格式转换、禁止改写任何字符。路径必须与工具返回的完全一致。**
+1. **图表路径问题（最高优先级）**：如 Markdown 图片引用 ![...](file_path) 中的路径与 generate_chart 返回的 file_path 不一致（包括时间戳不同、路径截断、添加/删除前缀等任何差异），必须：
+   - 找到 generate_chart 工具调用的返回结果，获取真实的 file_path
+   - 用真实路径替换错误路径，**逐字符完全一致**
+   - **禁止脑补路径**：如果找不到原始返回结果，重新调用 generate_chart 生成图表
+   - 修改后再次逐字符对比，确认路径与工具返回的 file_path 完全一致
 2. **图表信息不全**：如审核指出图表缺少某个分组维度（如缺少产品名称、年份标签等），必须：
    - 先调用 query_database 重新查询包含该维度的完整数据
    - 再调用 generate_chart 重新生成，确保图例/坐标轴包含所有要求的维度
    - 用新图表替换旧图表引用
-3. **图片跳过/未嵌入（新增）**：如审核指出已生成图表但答案中未用 `![标题](path)` 嵌入（含"请在 Finder 中打开""终端不支持图片""用 ASCII 替代""手动查看"等），必须：
-   - 重新调用 generate_chart 生成图表（参数与之前相同）
-   - 用 `![标题](file_path)` 语法嵌入到答案中（file_path 为工具返回的路径）
+3. **图片跳过/未嵌入/ASCII替代（新增）**：如审核指出已生成图表但答案中未用 `![标题](path)` 嵌入，或使用 ASCII 字符画/Unicode 框图/代码块模拟图表替代了真实图片，必须：
+   - 重新调用 generate_chart 生成图表（参数与之前相同，或根据上下文推断）
+   - 用 `![标题](file_path)` 语法嵌入到答案中（file_path 为工具返回的路径，逐字符复制）
+   - 删除所有 ASCII 字符画、Unicode 框图、代码块模拟等替代品
    - 删除所有"手动打开""Finder 查看""终端限制"等表述
 4. 保持原有答案结构、章节标题和文字内容完全不变，**只修复具体问题，不要修改其他内容**
 5. 修复完成后，输出完整的修正后答案（从一级标题开始，包含所有原有章节）
@@ -250,16 +361,34 @@ ANALYSIS_PROMPT = """## 分析阶段
 - 多组对比 → chart_type="comparison"（**每组有多个柱子时，必须提供 bar_labels 标明每个柱子代表什么指标**，如 "bar_labels": ["pH值","抗原含量","内毒素"]）
 - 帕累托分析 → chart_type="pareto"
 - 控制图/质量监控 → chart_type="control"
+- 排名/评分/综合对比 → chart_type="comparison"（将各产品得分作为 groups 传入）
+- 二维分布/优先级矩阵 → chart_type="heatmap" 或 chart_type="comparison"
 
-调用后图片保存到本地，**必须使用 generate_chart 返回结果中的 file_path 原样引用**。在 Markdown 中用 ![标题](file_path) 引用。**禁止对路径做任何修改：禁止添加/删除前缀、禁止格式转换、禁止改写任何字符。路径必须与工具返回的完全一致。**
+调用后图片保存到本地，**必须使用 generate_chart 返回结果中的 file_path 原样引用**。在 Markdown 中用 ![标题](file_path) 引用。
 
-**重要**：vaxport TUI 的 Markdown 渲染器支持内联图片显示，`![标题](path)` 会直接在对话区渲染图片。**禁止**用"请在 Finder 中打开""终端不支持图片""用 ASCII 图表替代"等方式跳过图片嵌入。生成图表后必须嵌入。
+🔴 **路径精确性铁律（最高优先级）**：
+- generate_chart 返回的 file_path 是一个完整的文件路径字符串，**必须逐字符原样复制**到 ![标题](file_path) 中
+- **禁止**对路径做任何修改：禁止添加/删除前缀、禁止格式转换、禁止改写任何字符、**禁止脑补或猜测路径**
+- 路径中的时间戳（如 1780470752327）是工具自动生成的，**绝不允许修改或替换**
+- 如果你不确定路径是什么，回头看 generate_chart 的返回结果，不要自己编
+
+🔴 **图表生成铁律**：
+- vaxport TUI 支持 Markdown 内联图片显示，`![标题](path)` 会直接在对话区渲染图片
+- **绝对禁止**用以下任何方式替代 generate_chart 调用：ASCII 字符画、Unicode 框图、代码块模拟图表、CSS/HTML 图表、纯文字描述代替图表
+- 任何需要可视化呈现的数据（排名对比、趋势变化、分布关系、矩阵定位），都必须调用 generate_chart 生成 PNG 图片
+- **不要自己画图**——你的任务是调用工具生成图片，然后用 ![](path) 嵌入
 
 **数据完整性第一原则**：
 - 零是有效数据：如果某些月份/分组没有符合过滤条件的记录，必须在答案中明确标注"X月: 0次"，不能跳过这些月份
 - 如果 GROUP BY 查询只返回了少数月份，必须先执行一条无 WHERE 过滤的 COUNT(*) GROUP BY 验证查询，确认数据覆盖的所有时间段
 - 将验证查询的完整时间段与过滤查询的结果合并，缺失月份补零，确保答案覆盖全部时间段
 - **禁止**在答案中使用"建议查询更多数据""需补充X月数据""需更多数据验证"等让用户自行获取数据的表述。你需要的数据，自己直接查，不要建议用户去做
+
+**对比分析输出规范**：
+- 涉及多个对象（菌株/产品/批次/供应商等）对比时，**必须使用 Markdown 表格**呈现数据，禁止只用纯文字叙述
+- 表格中必须包含**排名列**（如"排名"、"排序"）或按关键指标从高到低/从低到高排序，让读者一眼看出最优/最差
+- 每个对比维度（如产量、质量、稳定性）各一张表 + 一张图，图表结合
+- 最终结论章节使用"综合排名表"汇总所有维度，给出综合排序
 
 可以继续调用图表生成、统计分析等工具完成分析任务。
 
@@ -314,11 +443,13 @@ class Agent:
                  total_timeout: int = 0, system_prompt: str = None,
                  tool_filter: list[str] = None,
                  auto_plan: bool = True, plan_confirm: bool = True,
-                 auto_review: bool = True, preferred_model: str | None = None):
+                 auto_review: bool = True, preferred_model: str | None = None,
+                 temperature: float = 0.1):
         self.llm = llm_client
         self.tools = tool_registry
         self.max_rounds = max_rounds
         self.total_timeout = total_timeout
+        self.temperature = temperature
         self.debug_mode = False
         self._system_prompt = system_prompt if system_prompt else self.SYSTEM_PROMPT
         self._tool_filter = tool_filter
@@ -403,7 +534,7 @@ class Agent:
             ]
             resp = self.llm.chat_completion(
                 messages=compress_messages, tools=None, stream=False,
-                model=self.preferred_model,
+                model=self.preferred_model, temperature=self.temperature,
             )
             summary_text = resp.choices[0].message.content or ""
             self.llm.record_success()
@@ -453,7 +584,7 @@ class Agent:
         try:
             stream = self.llm.chat_completion(
                 messages=plan_messages, tools=None, stream=True,
-                model=self.preferred_model,
+                model=self.preferred_model, temperature=self.temperature,
             )
             plan_parts: list[str] = []
             for chunk in stream:
@@ -491,7 +622,7 @@ class Agent:
         try:
             resp = self.llm.chat_completion(
                 messages=review_messages, tools=None, stream=False,
-                model=self.preferred_model,
+                model=self.preferred_model, temperature=self.temperature,
             )
             self.llm.record_success()
             review_result = resp.choices[0].message.content or ""
@@ -589,7 +720,7 @@ class Agent:
         try:
             resp = self.llm.chat_completion(
                 messages=messages, tools=None, stream=False,
-                model=self.preferred_model,
+                model=self.preferred_model, temperature=self.temperature,
             )
             self.llm.record_success()
             content = resp.choices[0].message.content or ""
@@ -705,6 +836,7 @@ class Agent:
                 tools=tool_definitions if tool_definitions else None,
                 stream=True,
                 model=self.preferred_model,
+                temperature=self.temperature,
             )
             content_parts: list[str] = []
             tool_call_acc: dict[int, dict] = {}
@@ -767,7 +899,7 @@ class Agent:
 
     def _append_tool_results(self, messages: list, tool_calls_list: list,
                               collected_content: str, callbacks: ProgressCallbacks,
-                              sql_log: list) -> None:
+                              sql_log: list, state: AgentLoopState = None) -> None:
         """执行工具调用并追加 assistant + tool 消息到 messages。"""
         messages.append({
             "role": "assistant",
@@ -792,37 +924,65 @@ class Agent:
             except json.JSONDecodeError:
                 arguments = {}
 
-            callbacks.on_tool_call(tool_name, arguments)
-            result = self.tools.execute(tool_name, arguments)
+            # ── 工具结果缓存：相同工具+相同参数 → 直接返回缓存 ──
+            cache_key = f"{tool_name}:{tc.function.arguments}"
+            if state and cache_key in state._tool_result_cache:
+                result = state._tool_result_cache[cache_key]
+                callbacks.on_tool_call(tool_name, arguments)
+                try:
+                    result_data = json.loads(result)
+                    row_count = result_data.get("row_count", 0)
+                    truncated = result_data.get("truncated", False)
+                    callbacks.on_tool_result(row_count, truncated)
+                    callbacks.on_thinking(f"⚡ {tool_name}（缓存命中，跳过重复执行）")
+                except (json.JSONDecodeError, TypeError):
+                    callbacks.on_tool_result(0)
+            else:
+                callbacks.on_tool_call(tool_name, arguments)
+                result = self.tools.execute(tool_name, arguments)
+                if state:
+                    state._tool_result_cache[cache_key] = result
 
-            try:
-                result_data = json.loads(result)
-                if "sql" in result_data:
-                    sql_log.append(result_data["sql"])
-                    callbacks.on_sql(result_data["sql"])
-                row_count = result_data.get("row_count", 0)
-                truncated = result_data.get("truncated", False)
-                callbacks.on_tool_result(row_count, truncated)
-            except (json.JSONDecodeError, TypeError):
-                result_data = {}
-                callbacks.on_tool_result(0)
+                try:
+                    result_data = json.loads(result)
+                    if "sql" in result_data:
+                        sql_log.append(result_data["sql"])
+                        callbacks.on_sql(result_data["sql"])
+                    row_count = result_data.get("row_count", 0)
+                    truncated = result_data.get("truncated", False)
+                    callbacks.on_tool_result(row_count, truncated)
+                except (json.JSONDecodeError, TypeError):
+                    result_data = {}
+                    callbacks.on_tool_result(0)
 
-            # 自动追踪查询过的表名（用于后续追问上下文注入）
-            if tool_name.startswith("query_") and "error" not in (result_data if isinstance(result_data, dict) else {}):
-                self._extract_and_record_tables(arguments)
+                # 检测图表生成工具调用
+                if tool_name == "generate_chart" and isinstance(result_data, dict):
+                    file_path = result_data.get("file_path", "")
+                    if file_path:
+                        callbacks.on_chart(file_path)
 
-            # EAR Guard Rails: 记录轨迹并监控
-            success = "error" not in result_data if isinstance(result_data, dict) else True
-            self._trajectory_history.append(StepRecord(
-                tool_name=tool_name,
-                arguments=arguments,
-                success=success,
-            ))
-            regulation = self.tools.guard_rails.monitor_trajectory(self._trajectory_history)
-            if regulation.action != "continue":
-                # 将regulation message追加到result中
-                regulation_msg = f"\n\n[轨迹监控提示]: {regulation.message}"
-                result = result + regulation_msg
+                # 自动追踪查询过的表名（用于后续追问上下文注入）
+                if tool_name.startswith("query_") and "error" not in (result_data if isinstance(result_data, dict) else {}):
+                    self._extract_and_record_tables(arguments)
+
+                # EAR Guard Rails: 记录轨迹并监控
+                success = "error" not in result_data if isinstance(result_data, dict) else True
+                self._trajectory_history.append(StepRecord(
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    success=success,
+                ))
+                regulation = self.tools.guard_rails.monitor_trajectory(self._trajectory_history)
+                if regulation.action != "continue":
+                    regulation_msg = f"\n\n[轨迹监控提示]: {regulation.message}"
+                    result = result + regulation_msg
+
+            # 记录到摘要列表（用于上下文注入）
+            if state:
+                state._all_tool_calls_summary.append({
+                    "tool": tool_name,
+                    "args_keys": list(arguments.keys()) if isinstance(arguments, dict) else [],
+                })
 
             result = truncate_tool_result(result)
             messages.append({
@@ -1021,7 +1181,7 @@ class Agent:
                     {"role": "user", "content": prompt},
                 ],
                 tools=None, stream=False,
-                model=self.preferred_model,
+                model=self.preferred_model, temperature=self.temperature,
             )
             self.llm.record_success()
             content = resp.choices[0].message.content or ""
@@ -1407,10 +1567,29 @@ class Agent:
                         "content": "⚠️ 对话历史已自动裁剪以保持在上下文窗口内。",
                     })
 
+                # ── 上下文注入：已调用工具摘要（防止 LLM 重复调用）──
+                injected = False
+                if state._all_tool_calls_summary:
+                    summary_lines = []
+                    for s in state._all_tool_calls_summary:
+                        keys = ", ".join(s["args_keys"]) if s["args_keys"] else "无参数"
+                        summary_lines.append(f"- {s['tool']}({keys})")
+                    summary_text = (
+                        "以下是本轮对话中你已经调用过的工具列表。"
+                        "请勿重复调用相同工具+相同参数，如需相同数据请直接使用已有结果。\n"
+                        + "\n".join(summary_lines)
+                    )
+                    messages.append({"role": "system", "content": summary_text})
+                    injected = True
+
                 # 调用 LLM（流式）
                 collected_content, tool_calls_list, error = self._single_llm_turn(
                     messages, tool_definitions if tool_definitions else None, callbacks,
                     cancel_event=cancel_event)
+
+                # 移除注入的摘要消息（避免污染历史）
+                if injected:
+                    messages.pop()
 
                 if error:
                     final_answer = f"❌ LLM 调用失败: {error}\n当前后端: {self.llm.active_backend}，已自动尝试切换。"
@@ -1444,12 +1623,50 @@ class Agent:
                             final_answer = f"⚠️ 工具 {tc.function.name} 连续 {state._consecutive_same_count} 次使用相同参数调用，已中断。"
                             break
 
+                    # 3. 渐进式相似度检测（同工具、仅微调参数）
+                    if not final_answer:
+                        for tc in tool_calls_list:
+                            try:
+                                cur_args = json.loads(tc.function.arguments)
+                            except json.JSONDecodeError:
+                                cur_args = {}
+
+                            # 检查是否为多样化的批处理（如对比多个菌株）
+                            if _is_diverse_batch(tc.function.name, state._recent_tool_params):
+                                # 合法批处理，不计入相似度检测
+                                state._recent_tool_params.append((tc.function.name, cur_args))
+                                continue
+
+                            # 统计同工具近期调用中，参数值高度相似的次数
+                            high_sim_count = 0
+                            for prev_name, prev_args in state._recent_tool_params:
+                                if prev_name != tc.function.name:
+                                    continue
+                                if not isinstance(prev_args, dict) or not isinstance(cur_args, dict):
+                                    continue
+
+                                # 计算参数集的相似度
+                                sim = _args_similarity(prev_args, cur_args)
+                                # 相似度 >= 0.85 认为高度相似（如日期仅差1天、阈值微调等）
+                                if sim >= 0.85:
+                                    high_sim_count += 1
+
+                            # 阈值从 3 提高到 5，给批处理留出空间
+                            if high_sim_count >= 5:
+                                final_answer = f"⚠️ 工具 {tc.function.name} 连续 {high_sim_count+1} 次参数高度相似调用，已中断。请换用不同分析方法或工具。"
+                                break
+
+                            state._recent_tool_params.append((tc.function.name, cur_args))
+
+                        # 只保留最近 20 条记录
+                        state._recent_tool_params = state._recent_tool_params[-20:]
+
                     if final_answer:
                         break
 
                     state.tool_call_signatures.append(current_signatures)
                     self._append_tool_results(messages, tool_calls_list, collected_content,
-                                              callbacks, sql_log)
+                                              callbacks, sql_log, state)
                     callbacks.on_thinking("分析查询结果...")
                     continue
 

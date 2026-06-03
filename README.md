@@ -775,6 +775,20 @@ agent:
 - 全部关闭即回到无 hooks 模式，与旧版行为一致
 - 额外 token 成本：~1300 tokens/查询（约占用 128K 上下文的 1%）
 
+## 按 Agent Temperature 配置
+
+每个 Agent 可独立设置 temperature，TUI 中 Ctrl+P 或 GUI 设置页均可调整：
+
+```yaml
+agent:
+  agent_temperatures:
+    task_assigner: 0.0       # 纯路由分类，需要确定性输出
+    general: 0.1             # 工具调用需要精确参数
+    analyze_reporter: 0.3    # 分析文本需要一定创造性
+    quality_supervision: 0.1 # 质检需要精确判断
+    document_search: 0.2     # 检索需要灵活性
+```
+
 ## 命令参考
 
 | 命令 | 功能 |
@@ -1012,6 +1026,17 @@ GeneralAgent → [HANDOFF:analyze_reporter]
 - **上下文压缩**：超 75% 窗口触发 · 保留最近 3 轮对话
 
 ## 版本历史
+
+### v1.2.0 (2026-06-03)
+
+- **按 Agent 设置 Temperature**：取消全局 temperature，改为每个 Agent 独立配置（任务分配 0.0 / 通用 0.1 / 分析报告 0.3 / 质量监督 0.1 / 文档检索 0.2）
+- **LLM 随机性缓解**：语义相似度检测 + 批量处理识别（多样性阈值 0.6），防止 Agent 重复调用相同工具，同时不误判合法批量操作
+- **上下文注入**：LLM 调用前注入历史调用摘要，引导 LLM 避免无意义重复
+- **图表链路打通**：Agent → SSE → 前端完整图表数据流（base64 PNG）
+- **TUI 模型列表精简**：Ctrl+P 仅展示 4 个指定模型（deepseek-v4-pro/flash、qwen3.7-max、qwen-max）
+- **规划输出清理**：PLAN_PROMPT 禁止输出"确认后执行"等对话性文本
+- **会话清理**：过滤 0 条消息的无效会话记录
+- **`_append_tool_results` None 守卫**：修复 state 参数为 None 时的 AttributeError
 
 ### v1.1.0 (2026-06-02)
 

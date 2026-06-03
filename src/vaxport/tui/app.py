@@ -282,6 +282,14 @@ AGENT_MODEL_ROWS = [
     ("document_search", "文档检索",     "🔍"),
 ]
 
+AGENT_TEMP_DEFAULTS = {
+    "task_assigner": (0.0, "纯路由分类，需要确定性输出"),
+    "general": (0.1, "工具调用需要精确参数"),
+    "analyze_reporter": (0.3, "分析文本需要一定创造性"),
+    "quality_supervision": (0.1, "质检需要精确判断"),
+    "document_search": (0.2, "检索需要灵活性"),
+}
+
 
 class AgentModelPickerScreen(ModalScreen[str | None]):
     """Ctrl+P Agent 模型选择器 — 两级：Agent 列表 → 模型列表"""
@@ -303,6 +311,12 @@ class AgentModelPickerScreen(ModalScreen[str | None]):
             yield Static("Agent 模型配置  [↑↓]移动  [Enter]修改模型  [Esc]关闭",
                          id="picker-title")
             yield OptionList(id="picker-list")
+            temp_input = Input(
+                placeholder="输入 temperature 值 (0.0~2.0)",
+                id="temp-input",
+            )
+            temp_input.display = False
+            yield temp_input
 
     def on_mount(self) -> None:
         self._show_agent_list()
@@ -328,6 +342,23 @@ class AgentModelPickerScreen(ModalScreen[str | None]):
             ol.add_option(Option(
                 f"{prefix}{display_name}: {current}",
                 id=f"agent:{agent_key}"
+            ))
+
+        # 分隔线
+        ol.add_option(Option(
+            "[bold #BD93F9]-- Temperature 设置 --[/]",
+            disabled=True
+        ))
+
+        # Per-agent temperature 设置入口
+        for agent_key, display_name, icon in AGENT_MODEL_ROWS:
+            if agent_key == "global":
+                continue
+            current_temp = self._cfg.get_agent_temperature(agent_key)
+            rec_temp, rec_reason = AGENT_TEMP_DEFAULTS.get(agent_key, (0.1, ""))
+            ol.add_option(Option(
+                f"🌡️ {display_name}: {current_temp:.1f}  [dim](推荐 {rec_temp:.1f})[/]",
+                id=f"temp_entry:{agent_key}"
             ))
 
     def _show_model_list(self, agent_key: str) -> None:
@@ -368,6 +399,66 @@ class AgentModelPickerScreen(ModalScreen[str | None]):
                 id=f"model:{agent_key}:{model_id}"
             ))
 
+    def _show_temperature_input(self, agent_key: str) -> None:
+        """显示 temperature 输入框，支持直接输入数值"""
+        self._selected_agent = agent_key
+        ol = self.query_one("#picker-list", OptionList)
+        ol.clear_options()
+
+        agent_info = next((r for r in AGENT_MODEL_ROWS if r[0] == agent_key), None)
+        agent_display = agent_info[1] if agent_info else agent_key
+        current_temp = self._cfg.get_agent_temperature(agent_key)
+        rec_temp, rec_reason = AGENT_TEMP_DEFAULTS.get(agent_key, (0.1, ""))
+
+        self.query_one("#picker-title", Static).update(
+            f"设置 {agent_display} 的 Temperature  [Esc]返回"
+        )
+
+        # 添加推荐值选项
+        ol.add_option(Option(
+            f"使用推荐值 {rec_temp:.1f}  [dim]— {rec_reason}[/]",
+            id=f"temp_rec:{agent_key}:{rec_temp:.1f}"
+        ))
+
+        # 添加输入提示
+        ol.add_option(Option(
+            f"[italic]当前值: {current_temp:.1f} — 输入新数值后按 Enter[/]",
+            disabled=True
+        ))
+
+        # 显示 Input widget
+        try:
+            input_widget = self.query_one("#temp-input", Input)
+            input_widget.value = str(current_temp)
+            input_widget.display = True
+            input_widget.focus()
+        except Exception:
+            pass
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """处理 temperature 输入"""
+        if event.input.id != "temp-input":
+            return
+        try:
+            temp_val = float(event.value)
+            temp_val = max(0.0, min(2.0, temp_val))
+        except ValueError:
+            event.input.value = str(self._cfg.get_agent_temperature(self._selected_agent or "general"))
+            return
+
+        agent_key = self._selected_agent or "general"
+        self._cfg.set_agent_temperature(agent_key, temp_val)
+        if self._orchestrator:
+            self._orchestrator.update_agent_temperature(agent_key, temp_val)
+
+        # 隐藏 input 并返回 agent 列表
+        try:
+            input_widget = self.query_one("#temp-input", Input)
+            input_widget.display = False
+        except Exception:
+            pass
+        self._show_agent_list()
+
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         opt_id = event.option_id or ""
 
@@ -375,6 +466,20 @@ class AgentModelPickerScreen(ModalScreen[str | None]):
             # 选中 Agent → 进入模型列表
             agent_key = opt_id.split(":", 1)[1]
             self._show_model_list(agent_key)
+
+        elif opt_id.startswith("temp_entry:"):
+            # 选中 temperature 入口 → 显示输入界面
+            agent_key = opt_id.split(":", 1)[1]
+            self._show_temperature_input(agent_key)
+
+        elif opt_id.startswith("temp_rec:"):
+            # 选中推荐值 → 直接应用
+            _, agent_key, temp_str = opt_id.split(":", 2)
+            temp_val = float(temp_str)
+            self._cfg.set_agent_temperature(agent_key, temp_val)
+            if self._orchestrator:
+                self._orchestrator.update_agent_temperature(agent_key, temp_val)
+            self._show_agent_list()
 
         elif opt_id.startswith("model:"):
             # 选中模型 → 持久化并返回 Agent 列表
@@ -388,6 +493,12 @@ class AgentModelPickerScreen(ModalScreen[str | None]):
                     backend = self._find_backend_for_model(model_id)
                     if backend:
                         self._llm.set_model(backend, model_id)
+                        self._cfg.set("agent", "primary_backend", backend)
+                        if backend == "aliyun":
+                            self._cfg.set("api", "aliyun_model", model_id)
+                        else:
+                            self._cfg.set("local", "ollama_model", model_id)
+                        self._cfg.save()
             else:
                 self._cfg.set_agent_model(agent_key, model_id)
                 if self._orchestrator:
@@ -1405,13 +1516,16 @@ class VaxportApp(App):
         self.call_from_thread(self._show_picker, items)
 
     def _do_fetch_models(self) -> list:
+        allowed_models = {
+            "qwen3.7-max", "deepseek-v4-pro", "deepseek-v4-flash", "glm-5.1"
+        }
         seen: set[tuple[str, str]] = set()
         items: list[tuple[str, str, str]] = []
 
         if self.llm:
             for name in self.llm.available_backends:
                 state = self.llm._states.get(name)
-                if state and state.model:
+                if state and state.model and state.model in allowed_models:
                     seen.add((name, state.model))
 
         if self.llm:
@@ -1419,7 +1533,7 @@ class VaxportApp(App):
                 try:
                     api_models = self.llm.list_models(name)
                     for m in api_models:
-                        if (name, m) not in seen:
+                        if m in allowed_models and (name, m) not in seen:
                             seen.add((name, m))
                 except Exception:
                     pass
@@ -1917,12 +2031,28 @@ class VaxportApp(App):
             else:
                 display_text = display_text.strip()
 
-        # 流式已完成 → 应用路径修复，更新最终展示内容
+        # 流式已完成 → 如果流式内容与 answer 一致，仅追加 agent 标签，不重复更新
         if callbacks and callbacks._answer_widget and display_text:
-            try:
-                callbacks._answer_widget.update(display_text)
-            except Exception:
-                pass
+            streamed_content = callbacks.get_streamed_content()
+            if streamed_content and streamed_content.strip() == answer.strip():
+                # 流式内容已完整，仅追加 agent 标签
+                agent_chain = result.get("agent_chain", [])
+                if agent_chain:
+                    tags = []
+                    seen = set()
+                    for atype in agent_chain:
+                        if atype not in seen:
+                            seen.add(atype)
+                            icon, label, _ = AGENT_LABELS.get(atype, ("🤖", "通用", ""))
+                            tags.append(f"{icon} **{label} Agent**")
+                    if tags:
+                        tag_line = " | ".join(tags)
+                        self._add_info(f"> {tag_line}")
+            else:
+                try:
+                    callbacks._answer_widget.update(display_text)
+                except Exception:
+                    pass
         elif display_text:
             self._add_agent_response(display_text)
 

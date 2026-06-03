@@ -28,6 +28,11 @@ class AgentModelRequest(BaseModel):
     model: str | None = None  # None = 继承全局
 
 
+class TemperatureRequest(BaseModel):
+    agent_name: str  # "task_assigner", "general", "analyze_reporter", ...
+    temperature: float  # 0.0 ~ 2.0
+
+
 class SessionResumeRequest(BaseModel):
     session_ref: str  # 会话文件名/ID
 
@@ -40,6 +45,19 @@ class EARFeedbackRequest(BaseModel):
     task_id: str
     satisfaction: bool  # True=满意, False=不满意
     notes: str = ""
+
+
+class ConfigUpdateRequest(BaseModel):
+    api_key: str | None = None
+    base_url: str | None = None
+    ollama_url: str | None = None
+    ollama_model: str | None = None
+    backend: str | None = None        # "aliyun" | "ollama"
+    model: str | None = None          # 全局模型名
+    agent_model: dict | None = None   # {"agent_name": "xxx", "model": "yyy" | null}
+    auto_plan: bool | None = None
+    plan_confirm: bool | None = None
+    auto_qc: bool | None = None
 
 
 # ── 查询类端点 ─────────────────────────────────────
@@ -204,6 +222,26 @@ async def set_agent_model(req: AgentModelRequest):
     }
 
 
+@router.post("/api/temperature")
+async def set_temperature(req: TemperatureRequest):
+    """设置指定 Agent 的 LLM temperature（0.0~2.0）"""
+    if _state["app"] is None:
+        raise HTTPException(status_code=503, detail="后端未初始化")
+
+    valid_agents = {"task_assigner", "general", "analyze_reporter", "quality_supervision", "document_search"}
+    if req.agent_name not in valid_agents:
+        raise HTTPException(status_code=400, detail=f"未知 Agent: {req.agent_name}")
+
+    temp = max(0.0, min(2.0, req.temperature))
+    _state["app"].config.set_agent_temperature(req.agent_name, temp)
+
+    # 更新运行中的 Orchestrator
+    if _state["app"].orchestrator:
+        _state["app"].orchestrator.update_agent_temperature(req.agent_name, temp)
+
+    return {"status": "ok", "agent_name": req.agent_name, "temperature": temp}
+
+
 @router.post("/api/classify")
 async def classify_query(req: dict):
     """意图分类（供 TUI 提前获取路由信息）"""
@@ -255,9 +293,63 @@ async def get_config():
             "auto_plan": cfg.auto_plan,
             "plan_confirm": cfg.plan_confirm,
             "auto_review": cfg.auto_review,
+            "agent_temperatures": cfg.agent_temperatures,
             "agent_models": cfg.agent_models,
         },
     }
+
+
+@router.post("/api/config/update")
+async def update_config(req: ConfigUpdateRequest):
+    """持久化更新配置项（部分更新，仅传需要修改的字段）"""
+    if _state["app"] is None:
+        raise HTTPException(status_code=503, detail="后端未初始化")
+
+    cfg = _state["app"].config
+    changed = False
+
+    if req.api_key is not None:
+        cfg.set("api", "aliyun_key", req.api_key)
+        changed = True
+    if req.base_url is not None:
+        cfg.set("api", "aliyun_base_url", req.base_url)
+        changed = True
+    if req.ollama_url is not None:
+        cfg.set("local", "ollama_url", req.ollama_url)
+        changed = True
+    if req.ollama_model is not None:
+        cfg.set("local", "ollama_model", req.ollama_model)
+        changed = True
+    if req.backend is not None:
+        cfg.set("agent", "primary_backend", req.backend)
+        changed = True
+    if req.model is not None:
+        backend = req.backend or cfg.primary_backend
+        if backend == "aliyun":
+            cfg.set("api", "aliyun_model", req.model)
+        else:
+            cfg.set("local", "ollama_model", req.model)
+        changed = True
+    if req.agent_model is not None:
+        agent_name = req.agent_model.get("agent_name", "")
+        model_id = req.agent_model.get("model")  # None = 恢复继承全局
+        if agent_name:
+            cfg.set_agent_model(agent_name, model_id)
+            changed = True
+    if req.auto_plan is not None:
+        cfg.set("agent", "auto_plan", req.auto_plan)
+        changed = True
+    if req.plan_confirm is not None:
+        cfg.set("agent", "plan_confirm", req.plan_confirm)
+        changed = True
+    if req.auto_qc is not None:
+        cfg.set("agent", "auto_review", req.auto_qc)
+        changed = True
+
+    if changed:
+        cfg.save()
+
+    return {"status": "ok"}
 
 
 # ── 会话类端点 ─────────────────────────────────────
@@ -329,6 +421,31 @@ async def clear_session():
 
     _state["app"].session = Session()
     return {"status": "ok", "message": "会话已清空"}
+
+
+@router.get("/api/session/list")
+async def list_sessions():
+    """列出所有已保存的会话"""
+    from vaxport.session import Session
+    sessions = Session.list_sessions()
+    return {"sessions": sessions, "count": len(sessions)}
+
+
+class DeleteSessionRequest(BaseModel):
+    file: str
+
+
+@router.delete("/api/session/delete")
+async def delete_session(req: DeleteSessionRequest):
+    """删除指定会话文件"""
+    from vaxport.session import SESSION_DIR
+
+    filepath = SESSION_DIR / f"{req.file}.json"
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail=f"会话不存在: {req.file}")
+
+    filepath.unlink()
+    return {"status": "ok"}
 
 
 class SwitchDBRequest(BaseModel):
@@ -547,3 +664,72 @@ def _build_schema_tree(db_name: str, db) -> dict:
         "name": db_name,
         "schemas": sorted(schemas.values(), key=lambda x: x["name"]),
     }
+
+
+# ── 本地文件代理（供 GUI 渲染 matplotlib 图表）─────────────
+
+from fastapi.responses import FileResponse
+
+
+@router.get("/api/files/{path:path}")
+async def serve_local_file(path: str):
+    """提供 ~/.vaxport/ 下的本地文件访问（图表等）"""
+    base_dir = Path.home() / ".vaxport"
+    file_path = (base_dir / path).resolve()
+
+    # 安全检查：只允许访问 .vaxport 目录下的文件
+    if not str(file_path).startswith(str(base_dir.resolve())):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+
+    return FileResponse(file_path)
+
+
+# ── 导出端点 ─────────────────────────────────────────
+
+class ExportRequest(BaseModel):
+    content: str
+    name: str | None = None
+
+
+@router.post("/api/export/markdown")
+async def export_markdown(req: ExportRequest):
+    """导出 Markdown 文件，并复制引用的图表到 images/ 子目录"""
+    import re
+    import shutil
+
+    cfg = load_config()
+    export_dir = cfg.export_dir
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    name = req.name or timestamp
+    export_subdir = export_dir / name
+    export_subdir.mkdir(parents=True, exist_ok=True)
+
+    content = req.content
+    images_dir = export_subdir / "images"
+    copied = 0
+
+    for m in re.finditer(r'!\[([^\]]*)\]\(([^)]+)\)', content):
+        src_path = m.group(2)
+        src = None
+        # 完整路径: /Users/.../.vaxport/charts/xxx.png
+        if "/.vaxport/charts/" in src_path or "vaxport/charts" in src_path:
+            src = Path(src_path).expanduser()
+        # 相对路径（纯文件名）: chart_xxx.png
+        elif not src_path.startswith("http") and not src_path.startswith("/"):
+            src = Path.home() / ".vaxport" / "charts" / src_path
+        if src is None or not src.exists():
+            continue
+        images_dir.mkdir(exist_ok=True)
+        dst = images_dir / src.name
+        if not dst.exists():
+            shutil.copy2(src, dst)
+            copied += 1
+        rel_path = f"images/{src.name}"
+        content = content.replace(src_path, rel_path)
+
+    filepath = export_subdir / f"{name}.md"
+    filepath.write_text(content, encoding="utf-8")
+    return {"export_path": str(filepath), "images_copied": copied}

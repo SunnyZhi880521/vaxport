@@ -178,12 +178,12 @@ class LLMClient:
         return result
 
     def chat_completion(self, messages: list, tools: Optional[list] = None, stream: bool = False,
-                        model: str | None = None):
+                        model: str | None = None, temperature: float | None = None):
         """统一的 chat completion 调用，含 429 指数退避重试"""
         kwargs = {
             "model": model or self.active_model,
             "messages": messages,
-            "temperature": 0.1,
+            "temperature": temperature if temperature is not None else 0.1,
         }
         if tools:
             kwargs["tools"] = tools

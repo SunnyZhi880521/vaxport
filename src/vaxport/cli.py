@@ -107,7 +107,8 @@ class App:
         )
 
         # 自动发现数据库 schema 并生成工具 (多库模式)
-        if self.mdb and self.mdb.is_connected:
+        # 单库时不传 db_name，保持工具名 query_schema_table（避免前缀膨胀）
+        if self.mdb and self.mdb.is_connected and len(self.mdb.names) > 1:
             try:
                 for name in self.mdb.names:
                     db = self.mdb.get(name)
@@ -191,6 +192,7 @@ class App:
             tool_registry=self.tools,
             config=self.config,
             max_rounds=self.config.max_tool_rounds,
+            total_timeout=self.config.total_timeout,
             auto_plan=self.config.auto_plan,
             plan_confirm=False if is_one_shot else self.config.plan_confirm,
             auto_review=False if is_one_shot else self.config.auto_review,

@@ -42,6 +42,8 @@ class Session:
         self._write(AUTO_SAVE_FILE)
 
     def _write(self, filepath: Path):
+        if not self.messages:
+            return
         SESSION_DIR.mkdir(parents=True, exist_ok=True)
         data = {
             "session_id": self.session_id,
@@ -89,8 +91,11 @@ class Session:
             try:
                 with open(f, encoding="utf-8") as fp:
                     data = json.load(fp)
+                msgs = data.get("messages", [])
+                if not msgs:
+                    continue
                 first_query = ""
-                for msg in data.get("messages", []):
+                for msg in msgs:
                     if msg.get("role") == "user":
                         first_query = msg.get("content", "")[:100]
                         break
@@ -98,7 +103,7 @@ class Session:
                     "file": f.stem,
                     "start_time": data.get("start_time", ""),
                     "first_query": first_query,
-                    "message_count": len(data.get("messages", [])),
+                    "message_count": len(msgs),
                 })
             except Exception:
                 sessions.append({
@@ -137,9 +142,9 @@ def write_audit_log(entry: dict):
 
 
 def _cleanup_old_sessions():
-    """删除超过 1 天的旧会话文件（保留 _auto_save.json）"""
+    """删除超过 30 天的旧会话文件（保留 _auto_save.json）"""
     import time
-    cutoff = time.time() - 86400  # 24 小时
+    cutoff = time.time() - 2592000  # 30 天
     for f in SESSION_DIR.glob("*.json"):
         if f.name == "_auto_save.json":
             continue

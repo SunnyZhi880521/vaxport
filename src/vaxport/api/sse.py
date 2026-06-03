@@ -146,6 +146,22 @@ class SSECallbacks(ProgressCallbacks):
         self._plan_parts.append(text)
         self._put({"event": "plan_chunk", "data": {"text": text}})
 
+    def on_chart(self, file_path: str):
+        """图表生成完成，读取文件并发送 base64 数据"""
+        import base64
+        import os
+        if not os.path.exists(file_path):
+            return
+        try:
+            with open(file_path, "rb") as f:
+                image_data = base64.b64encode(f.read()).decode("utf-8")
+            self._put({
+                "event": "chart",
+                "data": {"file_path": file_path, "image": image_data},
+            })
+        except Exception:
+            pass
+
     def on_plan(self, plan_text: str) -> bool:
         """PRE-HOOK: 暂停等待用户确认
 
@@ -283,6 +299,7 @@ async def _event_generator(request_id: str, query: str, plan_mode: bool,
                     "sql_queries": result.get("sql_queries", []),
                     "model": result.get("model", ""),
                     "backend": result.get("backend", ""),
+                    "task_id": result.get("task_id", ""),
                 },
             })
 

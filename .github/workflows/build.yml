@@ -103,7 +103,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.target }}
-          path: Vaxport-GUI/src-tauri/target/release/bundle/**/*
+          path: |
+            Vaxport-GUI/src-tauri/target/release/bundle/dmg/*.dmg
+            Vaxport-GUI/src-tauri/target/release/bundle/msi/*.msi
+            Vaxport-GUI/src-tauri/target/release/bundle/deb/*.deb
 
   # ── GitHub Release ───────────────────────────────────────
   release:

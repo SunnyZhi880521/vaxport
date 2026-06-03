@@ -32,11 +32,14 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller vaxport.spec --noconfirm --clean
 
+      - name: Copy sidecar for upload
+        run: cp dist/vaxport-api* .
+
       - name: Upload sidecar artifact
         uses: actions/upload-artifact@v4
         with:
           name: sidecar-${{ matrix.target }}
-          path: dist/vaxport-api*
+          path: vaxport-api*
 
   # ── Tauri 打包 ───────────────────────────────────────────
   build-tauri:
@@ -66,11 +69,17 @@ jobs:
           name: sidecar-${{ matrix.target }}
           path: Vaxport-GUI/src-tauri/binaries/
 
-      - name: Rename sidecar
+      - name: Setup sidecar
         run: |
           mkdir -p Vaxport-GUI/src-tauri/binaries
-          mv Vaxport-GUI/src-tauri/binaries/vaxport-api${{ matrix.ext }} \
-             Vaxport-GUI/src-tauri/binaries/vaxport-api-${{ matrix.target }}${{ matrix.ext }} 2>/dev/null || true
+          SIDECAR=$(find Vaxport-GUI/src-tauri/binaries -name "vaxport-api*" -type f | head -1)
+          if [ -z "$SIDECAR" ]; then
+            echo "ERROR: sidecar binary not found in Vaxport-GUI/src-tauri/binaries/"
+            find Vaxport-GUI/src-tauri/binaries -type f | head -20
+            exit 1
+          fi
+          mv "$SIDECAR" "Vaxport-GUI/src-tauri/binaries/vaxport-api-${{ matrix.target }}${{ matrix.ext }}"
+          echo "Sidecar ready:"
           ls -la Vaxport-GUI/src-tauri/binaries/
         shell: bash
 

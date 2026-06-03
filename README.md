@@ -2,20 +2,31 @@
 
 疫苗企业本地 LLM 数据分析终端工具 — 用自然语言查询 PostgreSQL 数据库。
 
-## 启动
+## 安装方式
+
+### 桌面应用（推荐）
+
+一键安装，无需配置 Python 环境，包含所有依赖。
+
+| 平台 | 下载 |
+|------|------|
+| macOS | [Vaxport_1.3.0_aarch64.dmg](https://github.com/SunnyZhi880521/vaxport/releases/latest) |
+| Windows | [Vaxport_1.3.0_x64.msi](https://github.com/SunnyZhi880521/vaxport/releases/latest) |
+| Linux | [Vaxport_1.3.0_amd64.deb](https://github.com/SunnyZhi880521/vaxport/releases/latest) |
+
+> 最新版本和安装包可在 [GitHub Releases](https://github.com/SunnyZhi880521/vaxport/releases) 页面下载。
+
+### 命令行（开发者/高级用户）
 
 ```bash
-# 直接启动 Textual TUI
-make dev
-
-# 或
+git clone https://github.com/SunnyZhi880521/vaxport.git && cd vaxport
+pip install -e .
 vaxport
-
-# 直接查询（非交互模式）
-vaxport "查询所有批次的质量数据"
 ```
 
-## 前置要求
+详见下方 [命令行安装指南](#前置要求)。
+
+---
 
 ### Python 3.12+
 

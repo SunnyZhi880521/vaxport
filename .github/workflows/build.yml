@@ -13,7 +13,7 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            target: x86_64-apple-darwin
+            target: aarch64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
           - os: ubuntu-latest
@@ -45,7 +45,7 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            target: x86_64-apple-darwin
+            target: aarch64-apple-darwin
             ext: ''
             bundle: dmg
           - os: windows-latest

@@ -1,0 +1,23 @@
+/* Chat font size – controlled by AppearanceSettings */
+.markdown-content,
+.whitespace-pre-wrap {
+  font-size: var(--chat-font-size, 14px);
+}
+
+/* Compact density */
+.density-compact .markdown-content p,
+.density-compact .whitespace-pre-wrap {
+  margin-bottom: 0.25rem;
+  line-height: 1.4;
+}
+.density-compact [class*="mb-4"],
+.density-compact [class*="mb-6"] {
+  margin-bottom: 0.5rem;
+}
+.density-compact [class*="py-2.5"] {
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
+}
+.density-compact [class*="mt-2"] {
+  margin-top: 0.25rem;
+}

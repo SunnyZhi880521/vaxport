@@ -1027,6 +1027,10 @@ GeneralAgent → [HANDOFF:analyze_reporter]
 
 ## 版本历史
 
+### v1.3.0 (2026-06-03)
+
+- **跨平台打包**: 支持 DMG (macOS) / EXE (Windows) / DEB (Linux) 一键安装，PyInstaller 全量打包 + Tauri 套壳
+
 ### v1.2.0 (2026-06-03)
 
 - **按 Agent 设置 Temperature**：取消全局 temperature，改为每个 Agent 独立配置（任务分配 0.0 / 通用 0.1 / 分析报告 0.3 / 质量监督 0.1 / 文档检索 0.2）

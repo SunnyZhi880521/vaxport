@@ -25,3 +25,9 @@ myappdb_full.dump
 
 # Claude Code
 .claude/
+
+# Tauri GUI
+Vaxport-GUI/node_modules/
+Vaxport-GUI/dist/
+Vaxport-GUI/src-tauri/target/
+Vaxport-GUI/src-tauri/binaries/

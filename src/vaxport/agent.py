@@ -254,6 +254,11 @@ PLAN_PROMPT = """## 规划阶段（不可调用工具）
 - 全新话题、全新产品、全新时间范围
 - 与上一轮无关联的独立分析需求
 
+## 输出格式铁律（最高优先级）
+- **禁止在计划中输出任何 SQL 语句、代码块或工具调用参数**。计划只描述"要做什么"，不包含具体实现
+- **禁止输出对话历史或回忆上一轮内容**。本阶段唯一任务是规划新问题，不要总结过去
+- 严格按照模板格式输出，从"### 一、任务理解"开始
+
 现在开始规划用户的问题。"""
 
 REVIEW_PROMPT = """## 审核阶段（不可调用工具）
@@ -572,14 +577,23 @@ class Agent:
         plan_messages = [
             {"role": "system", "content": PLAN_PROMPT},
         ]
-        # 注入最近几轮对话，让 LLM 判断上下文连续性
+        # 注入最近几轮对话摘要，让 LLM 判断上下文连续性（不注入完整内容，避免干扰规划格式）
         if history:
-            for h in history[-6:]:  # 最近 3 轮交互
-                if h.get("role") in ("user", "assistant"):
-                    plan_messages.append({
-                        "role": h["role"],
-                        "content": str(h.get("content", ""))[:500],
-                    })
+            history_summary_parts: list[str] = []
+            for h in history[-6:]:
+                if h.get("role") == "user":
+                    history_summary_parts.append(f"[用户曾提问] {str(h.get('content', ''))[:200]}")
+                elif h.get("role") == "assistant":
+                    # 只提取话题标记，不注入完整回答（避免 SQL/表格等内容污染规划格式）
+                    content = str(h.get("content", ""))
+                    # 取第一段标题或前 100 字符作为话题摘要
+                    first_line = content.split("\n")[0].strip("# ")[:100]
+                    history_summary_parts.append(f"[上轮分析] {first_line}")
+            if history_summary_parts:
+                plan_messages.append({
+                    "role": "system",
+                    "content": "## 对话历史摘要（仅用于判断是否为追问）\n" + "\n".join(history_summary_parts),
+                })
         plan_messages.append({"role": "user", "content": user_query})
         try:
             stream = self.llm.chat_completion(

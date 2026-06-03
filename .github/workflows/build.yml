@@ -1,0 +1,125 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  # ── PyInstaller sidecar ──────────────────────────────────
+  build-sidecar:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -e . pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller vaxport.spec --noconfirm --clean
+
+      - name: Upload sidecar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidecar-${{ matrix.target }}
+          path: dist/vaxport-api*
+
+  # ── Tauri 打包 ───────────────────────────────────────────
+  build-tauri:
+    needs: build-sidecar
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            ext: ''
+            bundle: dmg
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: '.exe'
+            bundle: msi
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: ''
+            bundle: deb
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download sidecar
+        uses: actions/download-artifact@v4
+        with:
+          name: sidecar-${{ matrix.target }}
+          path: Vaxport-GUI/src-tauri/binaries/
+
+      - name: Rename sidecar
+        run: |
+          mkdir -p Vaxport-GUI/src-tauri/binaries
+          mv Vaxport-GUI/src-tauri/binaries/vaxport-api${{ matrix.ext }} \
+             Vaxport-GUI/src-tauri/binaries/vaxport-api-${{ matrix.target }}${{ matrix.ext }} 2>/dev/null || true
+          ls -la Vaxport-GUI/src-tauri/binaries/
+        shell: bash
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: Vaxport-GUI/pnpm-lock.yaml
+
+      - name: Install frontend deps
+        run: cd Vaxport-GUI && pnpm install
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
+
+      - name: Tauri build
+        run: cd Vaxport-GUI && pnpm tauri build --bundles ${{ matrix.bundle }}
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.target }}
+          path: Vaxport-GUI/src-tauri/target/release/bundle/**/*
+
+  # ── GitHub Release ───────────────────────────────────────
+  release:
+    needs: build-tauri
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: dist/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*
+          generate_release_notes: true

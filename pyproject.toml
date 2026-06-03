@@ -21,7 +21,7 @@ dependencies = [
 ]
 license = {text = "MIT"}
 authors = [
-    {name = "Sunny", email = "sunny@example.com"},
+    {name = "SunnyZhi", email = "sunnyzhi@example.com"},
 ]
 readme = "README.md"
 

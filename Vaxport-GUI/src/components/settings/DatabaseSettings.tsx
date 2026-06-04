@@ -27,7 +27,7 @@ export function DatabaseSettings() {
         if (pgCfg.user) setUser(pgCfg.user as string);
         if (pgCfg.password) setPassword(pgCfg.password as string);
       }
-    }).catch(() => {});
+    }).catch((e) => { console.error("加载数据库配置失败:", e); });
   }, []);
 
   // 自动保存（debounce）
@@ -69,14 +69,23 @@ export function DatabaseSettings() {
     }
   };
 
-  const handleTest = () => {
+  const handleTest = async () => {
     setTesting(true);
     setTestResult(null);
-    // Simulate test - in real app, call backend API
-    setTimeout(() => {
-      setTesting(false);
+    try {
+      await api.testDbConnection({
+        host,
+        port: parseInt(port) || 5432,
+        database,
+        user,
+        password,
+      });
       setTestResult("success");
-    }, 1500);
+    } catch {
+      setTestResult("fail");
+    } finally {
+      setTesting(false);
+    }
   };
 
   return (

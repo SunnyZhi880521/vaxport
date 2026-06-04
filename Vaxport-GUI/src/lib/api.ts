@@ -81,6 +81,17 @@ export const api = {
       method: "POST",
       body: JSON.stringify(updates),
     }),
+  testDbConnection: (params: {
+    host: string;
+    port: number;
+    database: string;
+    user: string;
+    password: string;
+  }) =>
+    request<{ status: string; message: string }>("/api/db/test", {
+      method: "POST",
+      body: JSON.stringify(params),
+    }),
 
   // Debug
   toggleDebug: () =>

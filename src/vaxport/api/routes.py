@@ -65,6 +65,14 @@ class ConfigUpdateRequest(BaseModel):
     db_password: str | None = None
 
 
+class DbTestRequest(BaseModel):
+    host: str
+    port: int = 5432
+    database: str
+    user: str
+    password: str = ""
+
+
 # ── 查询类端点 ─────────────────────────────────────
 
 @router.get("/api/status")
@@ -290,6 +298,7 @@ async def get_config():
             "port": cfg.pg_port,
             "database": cfg.pg_database,
             "user": cfg.pg_user,
+            "password": cfg.pg_password,
             "databases": cfg.db_configs,
         },
         "agent": {
@@ -370,6 +379,25 @@ async def update_config(req: ConfigUpdateRequest):
         cfg.save()
 
     return {"status": "ok"}
+
+
+@router.post("/api/db/test")
+async def test_db_connection(req: DbTestRequest):
+    """测试数据库连接"""
+    import psycopg2
+    try:
+        conn = psycopg2.connect(
+            host=req.host,
+            port=req.port,
+            dbname=req.database,
+            user=req.user,
+            password=req.password,
+            connect_timeout=10,
+        )
+        conn.close()
+        return {"status": "ok", "message": "连接成功"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"连接失败: {str(e)}")
 
 
 # ── 会话类端点 ─────────────────────────────────────

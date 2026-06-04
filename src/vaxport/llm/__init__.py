@@ -45,8 +45,11 @@ class LLMClient:
 
     def __post_init__(self):
         self._register_backends()
-        primary = self.config.primary_backend
-        self._active_backend = primary if primary in self._states else "aliyun"
+        if self._states:
+            primary = self.config.primary_backend
+            self._active_backend = primary if primary in self._states else next(iter(self._states))
+        else:
+            self._active_backend = ""
 
     def _register_backends(self):
         """注册所有可用后端"""
@@ -89,10 +92,14 @@ class LLMClient:
 
     @property
     def active_model(self) -> str:
+        if not self._active_backend or self._active_backend not in self._states:
+            return ""
         return self._states[self._active_backend].model
 
     @property
     def active_client(self) -> OpenAI:
+        if not self._active_backend or self._active_backend not in self._clients:
+            raise RuntimeError("没有可用的 LLM 后端，请先配置 API Key 或本地模型")
         return self._clients[self._active_backend]
 
     @property
@@ -205,6 +212,8 @@ class LLMClient:
     def fetch_model_max_tokens(self, model_name: str) -> int:
         """从 API 获取模型上下文窗口大小（max_tokens 字段）"""
         try:
+            if not self._active_backend or self._active_backend not in self._clients:
+                return 0
             # 用当前活跃后端的裸 http_client 调用 /v1/models/{name}
             client = self._clients[self._active_backend]
             # OpenAI SDK 屏蔽了直接访问，用 httpx 调用

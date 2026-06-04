@@ -1,6 +1,7 @@
 """配置管理 — YAML 配置文件读写 + 首次运行引导"""
 
 import os
+import sys
 import yaml
 from pathlib import Path
 from typing import Optional
@@ -316,5 +317,9 @@ def load_config() -> Config:
     """加载配置，首次运行自动引导"""
     config = Config()
     if not config.is_configured:
-        config = run_setup_wizard(config)
+        if sys.stdin.isatty():
+            config = run_setup_wizard(config)
+        else:
+            # headless 模式（如 Tauri sidecar），创建空配置文件
+            config.save()
     return config

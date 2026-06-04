@@ -8,40 +8,40 @@ from typing import Optional
 DEFAULT_CONFIG = {
     "api": {
         "aliyun_key": "",
-        "aliyun_model": "deepseek-v4-pro",
-        "aliyun_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "aliyun_model": "",
+        "aliyun_base_url": "",
     },
     "local": {
-        "ollama_url": "http://localhost:11434",
+        "ollama_url": "",
         "ollama_model": "",
     },
     "pg": {
-        "host": "localhost",
+        "host": "",
         "port": 5432,
-        "database": "vaccine_mes",
-        "user": "vlm_reader",
+        "database": "",
+        "user": "",
         "exclude_schemas": [],
-        "databases": [],  # 多数据库列表: [{name, database, host?, port?, user?, password?}]
+        "databases": [],
         "ssh_tunnel": {
             "enabled": False,
-            "jump_host": "",     # e.g. "user@jump.example.com"
+            "jump_host": "",
             "jump_port": 22,
-            "db_host": "",       # database host behind jump server
+            "db_host": "",
             "db_port": 5432,
-            "local_port": 5433,  # local port to forward to
+            "local_port": 5433,
         },
     },
     "agent": {
         "max_tool_rounds": 100,
-        "total_timeout": 600,  # 总执行超时（秒），0=不限制
+        "total_timeout": 600,
         "session_dir": "~/.vaxport/sessions",
         "primary_backend": "aliyun",
         "export_dir": "",
         "auto_plan": True,
         "plan_confirm": False,
         "auto_review": True,
-        "agent_temperatures": {},  # {"task_assigner": 0.0, "general": 0.1, "analyze_reporter": 0.3, ...}
-        "agent_models": {},  # {"task_assigner": "deepseek-v4-pro", "analyze_reporter": "deepseek-v4-pro", ...}
+        "agent_temperatures": {},
+        "agent_models": {},
     },
 }
 

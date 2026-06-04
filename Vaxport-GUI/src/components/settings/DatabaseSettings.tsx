@@ -1,13 +1,27 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { CheckCircle, XCircle, Loader2 } from "lucide-react";
+import { api } from "../../lib/api";
 
 export function DatabaseSettings() {
-  const [host, setHost] = useState("localhost");
+  const [host, setHost] = useState("");
   const [port, setPort] = useState("5432");
-  const [database, setDatabase] = useState("myappdb");
-  const [user, setUser] = useState("vlm_reader");
+  const [database, setDatabase] = useState("");
+  const [user, setUser] = useState("");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<"success" | "fail" | null>(null);
+
+  // 从后端加载配置
+  useEffect(() => {
+    api.getConfig().then((cfg) => {
+      const pgCfg = cfg.pg as Record<string, unknown> | undefined;
+      if (pgCfg) {
+        if (pgCfg.host) setHost(pgCfg.host as string);
+        if (pgCfg.port) setPort(String(pgCfg.port));
+        if (pgCfg.database) setDatabase(pgCfg.database as string);
+        if (pgCfg.user) setUser(pgCfg.user as string);
+      }
+    }).catch(() => {});
+  }, []);
 
   const handleTest = () => {
     setTesting(true);

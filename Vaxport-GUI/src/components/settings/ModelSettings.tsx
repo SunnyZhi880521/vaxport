@@ -22,13 +22,10 @@ const MODELS = [
 export function ModelSettings() {
   const [backend, setBackend] = useState<"aliyun" | "local">("aliyun");
   const [apiKey, setApiKey] = useState("");
-  const [apiKeyDirty, setApiKeyDirty] = useState(false);
   const [showKey, setShowKey] = useState(false);
-  const [model, setModel] = useState("deepseek-v4-pro");
-  const [baseUrl, setBaseUrl] = useState(
-    "https://dashscope.aliyuncs.com/compatible-mode/v1"
-  );
-  const [ollamaUrl, setOllamaUrl] = useState("http://localhost:11434");
+  const [model, setModel] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [ollamaUrl, setOllamaUrl] = useState("");
   const [ollamaModel, setOllamaModel] = useState("");
 
   // Agent preferences
@@ -41,6 +38,7 @@ export function ModelSettings() {
   const [agentModels, setAgentModels] = useState<Record<string, string | null>>({});
 
   // Debounce refs for text inputs
+  const apiKeyTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const baseUrlTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const ollamaUrlTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const ollamaModelTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -85,12 +83,13 @@ export function ModelSettings() {
     api.updateConfig({ model: m }).catch(() => {});
   }, []);
 
-  const handleApiKeyBlur = useCallback(() => {
-    if (apiKeyDirty && apiKey) {
-      api.updateConfig({ api_key: apiKey }).catch(() => {});
-      setApiKeyDirty(false);
-    }
-  }, [apiKey, apiKeyDirty]);
+  const handleApiKeyChange = useCallback((v: string) => {
+    setApiKey(v);
+    clearTimeout(apiKeyTimer.current);
+    apiKeyTimer.current = setTimeout(() => {
+      api.updateConfig({ api_key: v }).catch(() => {});
+    }, 800);
+  }, []);
 
   const handleBaseUrlChange = useCallback((v: string) => {
     setBaseUrl(v);
@@ -171,8 +170,7 @@ export function ModelSettings() {
                       <input
                         type={showKey ? "text" : "password"}
                         value={apiKey}
-                        onChange={(e) => { setApiKey(e.target.value); setApiKeyDirty(true); }}
-                        onBlur={handleApiKeyBlur}
+                        onChange={(e) => handleApiKeyChange(e.target.value)}
                         placeholder="sk-xxxxxxxx"
                         className="flex-1 rounded-lg border border-border-subtle bg-bg-primary px-3 py-1.5 text-sm text-text-primary placeholder:text-text-muted"
                       />

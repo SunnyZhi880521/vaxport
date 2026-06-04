@@ -58,6 +58,10 @@ class ConfigUpdateRequest(BaseModel):
     auto_plan: bool | None = None
     plan_confirm: bool | None = None
     auto_qc: bool | None = None
+    db_host: str | None = None
+    db_port: int | None = None
+    db_database: str | None = None
+    db_user: str | None = None
 
 
 # ── 查询类端点 ─────────────────────────────────────
@@ -344,6 +348,18 @@ async def update_config(req: ConfigUpdateRequest):
         changed = True
     if req.auto_qc is not None:
         cfg.set("agent", "auto_review", req.auto_qc)
+        changed = True
+    if req.db_host is not None:
+        cfg.set("pg", "host", req.db_host)
+        changed = True
+    if req.db_port is not None:
+        cfg.set("pg", "port", req.db_port)
+        changed = True
+    if req.db_database is not None:
+        cfg.set("pg", "database", req.db_database)
+        changed = True
+    if req.db_user is not None:
+        cfg.set("pg", "user", req.db_user)
         changed = True
 
     if changed:

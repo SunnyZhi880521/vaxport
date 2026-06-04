@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { CheckCircle, XCircle, Loader2 } from "lucide-react";
 import { api } from "../../lib/api";
 
@@ -7,8 +7,14 @@ export function DatabaseSettings() {
   const [port, setPort] = useState("5432");
   const [database, setDatabase] = useState("");
   const [user, setUser] = useState("");
+  const [password, setPassword] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<"success" | "fail" | null>(null);
+
+  // 保存 debounce refs
+  const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // 从后端加载配置
   useEffect(() => {
@@ -22,6 +28,43 @@ export function DatabaseSettings() {
       }
     }).catch(() => {});
   }, []);
+
+  // 自动保存（debounce）
+  const debounceSave = useCallback(() => {
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        await api.updateConfig({
+          db_host: host || null,
+          db_port: parseInt(port) || null,
+          db_database: database || null,
+          db_user: user || null,
+        });
+        setSaved(false);
+      } catch { /* ignore */ }
+    }, 800);
+  }, [host, port, database, user]);
+
+  // 手动保存
+  const handleSave = async () => {
+    clearTimeout(saveTimer.current);
+    setSaving(true);
+    setSaved(false);
+    try {
+      await api.updateConfig({
+        db_host: host || null,
+        db_port: parseInt(port) || null,
+        db_database: database || null,
+        db_user: user || null,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      // ignore
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleTest = () => {
     setTesting(true);
@@ -47,7 +90,7 @@ export function DatabaseSettings() {
               <input
                 type="text"
                 value={host}
-                onChange={(e) => setHost(e.target.value)}
+                onChange={(e) => { setHost(e.target.value); debounceSave(); }}
                 className="w-full rounded-lg border border-border-subtle bg-bg-tertiary px-3 py-2 text-sm text-text-primary"
               />
             </div>
@@ -56,7 +99,7 @@ export function DatabaseSettings() {
               <input
                 type="text"
                 value={port}
-                onChange={(e) => setPort(e.target.value)}
+                onChange={(e) => { setPort(e.target.value); debounceSave(); }}
                 className="w-full rounded-lg border border-border-subtle bg-bg-tertiary px-3 py-2 text-sm text-text-primary"
               />
             </div>
@@ -67,7 +110,7 @@ export function DatabaseSettings() {
               <input
                 type="text"
                 value={database}
-                onChange={(e) => setDatabase(e.target.value)}
+                onChange={(e) => { setDatabase(e.target.value); debounceSave(); }}
                 className="w-full rounded-lg border border-border-subtle bg-bg-tertiary px-3 py-2 text-sm text-text-primary"
               />
             </div>
@@ -76,7 +119,7 @@ export function DatabaseSettings() {
               <input
                 type="text"
                 value={user}
-                onChange={(e) => setUser(e.target.value)}
+                onChange={(e) => { setUser(e.target.value); debounceSave(); }}
                 className="w-full rounded-lg border border-border-subtle bg-bg-tertiary px-3 py-2 text-sm text-text-primary"
               />
             </div>
@@ -86,6 +129,25 @@ export function DatabaseSettings() {
 
       {/* Test connection */}
       <div className="flex items-center gap-3">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="rounded-lg bg-accent-purple px-4 py-2 text-sm font-medium text-white hover:bg-accent-purple/90 disabled:opacity-50"
+        >
+          {saving ? (
+            <span className="flex items-center gap-2">
+              <Loader2 size={14} className="animate-spin" />
+              保存中...
+            </span>
+          ) : saved ? (
+            <span className="flex items-center gap-2">
+              <CheckCircle size={14} />
+              已保存
+            </span>
+          ) : (
+            "💾 保存设置"
+          )}
+        </button>
         <button
           onClick={handleTest}
           disabled={testing}

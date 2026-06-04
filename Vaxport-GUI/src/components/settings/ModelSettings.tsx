@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Eye, EyeOff, ChevronUp, ChevronDown } from "lucide-react";
+import { Eye, EyeOff, ChevronUp, ChevronDown, CheckCircle, Loader2 } from "lucide-react";
 import { api } from "../../lib/api";
 
 const AGENTS = [
@@ -30,6 +30,10 @@ export function ModelSettings() {
   // Per-agent temperature & model
   const [temperatures, setTemperatures] = useState<Record<string, number>>({});
   const [agentModels, setAgentModels] = useState<Record<string, string | null>>({});
+
+  // Save button states
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   // Debounce refs for text inputs
   const apiKeyTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -145,6 +149,30 @@ export function ModelSettings() {
     setAutoQc(v);
     api.updateConfig({ auto_qc: v }).catch(() => {});
   }, []);
+
+  const handleSaveAll = async () => {
+    setSaving(true);
+    setSaved(false);
+    try {
+      await api.updateConfig({
+        api_key: apiKey || null,
+        model: model || null,
+        base_url: baseUrl || null,
+        ollama_url: ollamaUrl || null,
+        ollama_model: ollamaModel || null,
+        backend: backend,
+        auto_plan: autoPlan,
+        plan_confirm: planConfirm,
+        auto_qc: autoQc,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      // ignore
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -338,6 +366,29 @@ export function ModelSettings() {
             执行后自动质检
           </label>
         </div>
+      </div>
+
+      {/* Save button */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleSaveAll}
+          disabled={saving}
+          className="rounded-lg bg-accent-purple px-4 py-2 text-sm font-medium text-white hover:bg-accent-purple/90 disabled:opacity-50"
+        >
+          {saving ? (
+            <span className="flex items-center gap-2">
+              <Loader2 size={14} className="animate-spin" />
+              保存中...
+            </span>
+          ) : saved ? (
+            <span className="flex items-center gap-2">
+              <CheckCircle size={14} />
+              已保存
+            </span>
+          ) : (
+            "💾 保存设置"
+          )}
+        </button>
       </div>
     </div>
   );

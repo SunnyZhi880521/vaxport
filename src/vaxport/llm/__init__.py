@@ -133,6 +133,8 @@ class LLMClient:
 
     def record_failure(self):
         """记录当前后端失败"""
+        if not self._active_backend or self._active_backend not in self._states:
+            return
         state = self._states[self._active_backend]
         state.consecutive_failures += 1
         if state.consecutive_failures >= self.MAX_FAILURES:

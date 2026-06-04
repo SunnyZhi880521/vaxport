@@ -79,6 +79,7 @@ jobs:
             exit 1
           fi
           mv "$SIDECAR" "Vaxport-GUI/src-tauri/binaries/vaxport-api-${{ matrix.target }}${{ matrix.ext }}"
+          chmod +x "Vaxport-GUI/src-tauri/binaries/vaxport-api-${{ matrix.target }}${{ matrix.ext }}"
           echo "Sidecar ready:"
           ls -la Vaxport-GUI/src-tauri/binaries/
         shell: bash

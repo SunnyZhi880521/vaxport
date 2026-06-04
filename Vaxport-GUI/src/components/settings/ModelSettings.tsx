@@ -10,15 +10,6 @@ const AGENTS = [
   { id: "document_search", label: "文档检索", recommendedTemp: 0.2, reason: "检索需要灵活性" },
 ];
 
-const MODELS = [
-  "deepseek-v4-pro",
-  "deepseek-v4-flash",
-  "qwen3.7-max",
-  "qwen-max",
-  "qwen-plus",
-  "glm-5.1",
-];
-
 export function ModelSettings() {
   const [backend, setBackend] = useState<"aliyun" | "local">("aliyun");
   const [apiKey, setApiKey] = useState("");
@@ -27,6 +18,9 @@ export function ModelSettings() {
   const [baseUrl, setBaseUrl] = useState("");
   const [ollamaUrl, setOllamaUrl] = useState("");
   const [ollamaModel, setOllamaModel] = useState("");
+
+  // 从后端获取可用模型列表
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
 
   // Agent preferences
   const [autoPlan, setAutoPlan] = useState(true);
@@ -70,6 +64,15 @@ export function ModelSettings() {
         const models = agentCfg.agent_models as Record<string, string | null> | undefined;
         if (models) setAgentModels(models);
       }
+    }).catch(() => {});
+  }, []);
+
+  // 从后端获取可用模型列表
+  useEffect(() => {
+    api.getModels().then((data) => {
+      const models = (data.models as Array<{ model_id: string }>) || [];
+      const ids = models.map((m) => m.model_id).filter(Boolean);
+      if (ids.length > 0) setAvailableModels(ids);
     }).catch(() => {});
   }, []);
 
@@ -189,7 +192,12 @@ export function ModelSettings() {
                       onChange={(e) => handleModelChange(e.target.value)}
                       className="w-full rounded-lg border border-border-subtle bg-bg-primary px-3 py-1.5 text-sm text-text-primary"
                     >
-                      {MODELS.map((m) => <option key={m}>{m}</option>)}
+                      <option value="" disabled>-- 请选择模型 --</option>
+                      {[
+                        ...new Set([model, ...availableModels].filter(Boolean)),
+                      ].map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
                     </select>
                   </div>
                   <div>
@@ -266,7 +274,9 @@ export function ModelSettings() {
                     className="flex-1 rounded-lg border border-border-subtle bg-bg-primary px-2 py-1 text-sm text-text-primary"
                   >
                     <option value="__inherit__">跟随全局</option>
-                    {MODELS.map((m) => <option key={m} value={m}>{m}</option>)}
+                    {[
+                      ...new Set([...availableModels].filter(Boolean)),
+                    ].map((m) => <option key={m} value={m}>{m}</option>)}
                   </select>
                   <div className="flex items-center gap-0.5">
                     <button

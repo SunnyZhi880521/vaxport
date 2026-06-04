@@ -25,6 +25,7 @@ export function DatabaseSettings() {
         if (pgCfg.port) setPort(String(pgCfg.port));
         if (pgCfg.database) setDatabase(pgCfg.database as string);
         if (pgCfg.user) setUser(pgCfg.user as string);
+        if (pgCfg.password) setPassword(pgCfg.password as string);
       }
     }).catch(() => {});
   }, []);
@@ -39,11 +40,12 @@ export function DatabaseSettings() {
           db_port: parseInt(port) || null,
           db_database: database || null,
           db_user: user || null,
+          db_password: password || null,
         });
         setSaved(false);
       } catch { /* ignore */ }
     }, 800);
-  }, [host, port, database, user]);
+  }, [host, port, database, user, password]);
 
   // 手动保存
   const handleSave = async () => {
@@ -56,6 +58,7 @@ export function DatabaseSettings() {
         db_port: parseInt(port) || null,
         db_database: database || null,
         db_user: user || null,
+        db_password: password || null,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -123,6 +126,15 @@ export function DatabaseSettings() {
                 className="w-full rounded-lg border border-border-subtle bg-bg-tertiary px-3 py-2 text-sm text-text-primary"
               />
             </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-text-muted">密码</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); debounceSave(); }}
+              className="w-full rounded-lg border border-border-subtle bg-bg-tertiary px-3 py-2 text-sm text-text-primary"
+            />
           </div>
         </div>
       </div>

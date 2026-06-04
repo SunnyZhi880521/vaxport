@@ -62,6 +62,7 @@ class ConfigUpdateRequest(BaseModel):
     db_port: int | None = None
     db_database: str | None = None
     db_user: str | None = None
+    db_password: str | None = None
 
 
 # ── 查询类端点 ─────────────────────────────────────
@@ -360,6 +361,9 @@ async def update_config(req: ConfigUpdateRequest):
         changed = True
     if req.db_user is not None:
         cfg.set("pg", "user", req.db_user)
+        changed = True
+    if req.db_password is not None:
+        cfg.set("pg", "password", req.db_password)
         changed = True
 
     if changed:

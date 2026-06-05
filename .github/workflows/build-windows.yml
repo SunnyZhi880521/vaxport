@@ -48,6 +48,7 @@ jobs:
 
       - name: Copy binary to Tauri
         run: |
+          mkdir -p Vaxport-GUI/src-tauri/binaries/
           cp dist/vaxport-api.exe Vaxport-GUI/src-tauri/binaries/vaxport-api-x86_64-pc-windows-msvc.exe
 
           if [ ! -f Vaxport-GUI/src-tauri/binaries/vaxport-api-x86_64-pc-windows-msvc.exe ]; then

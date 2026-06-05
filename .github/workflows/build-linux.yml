@@ -53,6 +53,7 @@ jobs:
 
       - name: Copy binary to Tauri
         run: |
+          mkdir -p Vaxport-GUI/src-tauri/binaries/
           cp dist/vaxport-api Vaxport-GUI/src-tauri/binaries/vaxport-api-x86_64-unknown-linux-gnu
 
           if [ ! -f Vaxport-GUI/src-tauri/binaries/vaxport-api-x86_64-unknown-linux-gnu ]; then

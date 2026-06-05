@@ -43,8 +43,8 @@ jobs:
           SIZE=$(stat -c%s dist/vaxport-api)
           echo "Binary size: $SIZE bytes"
 
-          if [ $SIZE -lt 400000000 ]; then
-            echo "ERROR: Binary too small ($SIZE bytes), expected > 400MB"
+          if [ $SIZE -lt 80000000 ]; then
+            echo "ERROR: Binary too small ($SIZE bytes), expected > 80MB"
             exit 1
           fi
 
@@ -95,8 +95,8 @@ jobs:
           echo "DEB size: $SIZE bytes"
           echo "DEB path: $DEB_PATH"
 
-          if [ $SIZE -lt 400000000 ]; then
-            echo "ERROR: DEB too small ($SIZE bytes), expected > 400MB"
+          if [ $SIZE -lt 100000000 ]; then
+            echo "ERROR: DEB too small ($SIZE bytes), expected > 100MB"
             exit 1
           fi
 

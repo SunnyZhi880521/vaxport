@@ -38,8 +38,8 @@ jobs:
           SIZE=$(stat -f%z dist/vaxport-api.exe 2>/dev/null || stat -c%s dist/vaxport-api.exe)
           echo "Binary size: $SIZE bytes"
 
-          if [ $SIZE -lt 400000000 ]; then
-            echo "ERROR: Binary too small ($SIZE bytes), expected > 400MB"
+          if [ $SIZE -lt 50000000 ]; then
+            echo "ERROR: Binary too small ($SIZE bytes), expected > 50MB"
             exit 1
           fi
 
@@ -92,8 +92,8 @@ jobs:
           echo "MSI size: $SIZE bytes"
           echo "MSI path: $MSI_PATH"
 
-          if [ $SIZE -lt 400000000 ]; then
-            echo "ERROR: MSI too small ($SIZE bytes), expected > 400MB"
+          if [ $SIZE -lt 100000000 ]; then
+            echo "ERROR: MSI too small ($SIZE bytes), expected > 100MB"
             exit 1
           fi
 

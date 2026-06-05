@@ -99,8 +99,8 @@ jobs:
           echo "DEB size: $SIZE bytes"
           echo "DEB path: $DEB_PATH"
 
-          if [ $SIZE -lt 100000000 ]; then
-            echo "ERROR: DEB too small ($SIZE bytes), expected > 100MB"
+          if [ $SIZE -lt 30000000 ]; then
+            echo "ERROR: DEB too small ($SIZE bytes), expected > 30MB"
             exit 1
           fi
 

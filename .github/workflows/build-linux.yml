@@ -1,0 +1,110 @@
+name: Build Linux Installer
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget \
+            file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            libpq-dev
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r requirements.txt
+
+      - name: Build PyInstaller binary
+        run: |
+          pyinstaller vaxport.spec --clean --noconfirm
+
+          if [ ! -f dist/vaxport-api ]; then
+            echo "ERROR: PyInstaller binary not found"
+            exit 1
+          fi
+
+          SIZE=$(stat -c%s dist/vaxport-api)
+          echo "Binary size: $SIZE bytes"
+
+          if [ $SIZE -lt 400000000 ]; then
+            echo "ERROR: Binary too small ($SIZE bytes), expected > 400MB"
+            exit 1
+          fi
+
+          chmod +x dist/vaxport-api
+          echo "PyInstaller build successful"
+
+      - name: Copy binary to Tauri
+        run: |
+          cp dist/vaxport-api Vaxport-GUI/src-tauri/binaries/vaxport-api-x86_64-unknown-linux-gnu
+
+          if [ ! -f Vaxport-GUI/src-tauri/binaries/vaxport-api-x86_64-unknown-linux-gnu ]; then
+            echo "ERROR: Failed to copy binary to Tauri"
+            exit 1
+          fi
+
+          chmod +x Vaxport-GUI/src-tauri/binaries/vaxport-api-x86_64-unknown-linux-gnu
+          echo "Binary copied successfully"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install frontend dependencies
+        run: |
+          cd Vaxport-GUI
+          npm install
+
+      - name: Build Tauri app
+        run: |
+          cd Vaxport-GUI/src-tauri
+          cargo install tauri-cli
+          cargo tauri build
+
+      - name: Verify output
+        run: |
+          DEB_PATH=$(ls Vaxport-GUI/src-tauri/target/release/bundle/deb/*.deb 2>/dev/null | head -1)
+
+          if [ -z "$DEB_PATH" ]; then
+            echo "ERROR: DEB file not found"
+            exit 1
+          fi
+
+          SIZE=$(stat -c%s "$DEB_PATH")
+          echo "DEB size: $SIZE bytes"
+          echo "DEB path: $DEB_PATH"
+
+          if [ $SIZE -lt 400000000 ]; then
+            echo "ERROR: DEB too small ($SIZE bytes), expected > 400MB"
+            exit 1
+          fi
+
+          echo "Build successful!"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vaxport-linux-x64
+          path: Vaxport-GUI/src-tauri/target/release/bundle/deb/*.deb
+          retention-days: 30

@@ -2,6 +2,7 @@
 
 import os
 import sys
+import copy
 import yaml
 from pathlib import Path
 from typing import Optional
@@ -55,7 +56,7 @@ class Config:
 
     def __init__(self, config_path: Optional[Path] = None):
         self._path = config_path or CONFIG_PATH
-        self._data = DEFAULT_CONFIG.copy()
+        self._data = copy.deepcopy(DEFAULT_CONFIG)
         if self._path.exists():
             self._load()
 
@@ -110,7 +111,17 @@ class Config:
 
     @property
     def pg_password(self) -> str:
-        return os.getenv("PG_PASSWORD") or self._data["pg"].get("password", "")
+        env_pw = os.getenv("PG_PASSWORD")
+        if env_pw:
+            return env_pw
+        pw = self._data["pg"].get("password", "")
+        if pw:
+            return pw
+        # 回退：从 databases 数组的第一个条目获取密码
+        dbs = self._data["pg"].get("databases", [])
+        if dbs:
+            return dbs[0].get("password", "")
+        return ""
 
     @property
     def ssh_tunnel_enabled(self) -> bool:
@@ -251,9 +262,28 @@ class Config:
 
     def save(self):
         """保存配置到 YAML 文件"""
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._path, "w") as f:
-            yaml.dump(self._data, f, allow_unicode=True, default_flow_style=False)
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._path, "w") as f:
+                yaml.dump(self._data, f, allow_unicode=True, default_flow_style=False)
+            # 写入成功日志
+            log_path = self._path.parent / "save.log"
+            try:
+                with open(log_path, "a") as log_f:
+                    from datetime import datetime
+                    log_f.write(f"[{datetime.now().isoformat()}] config saved to {self._path}\n")
+            except Exception:
+                pass  # 日志失败不影响主流程
+        except Exception as e:
+            # 写入失败日志
+            log_path = self._path.parent / "save_error.log"
+            try:
+                with open(log_path, "a") as log_f:
+                    from datetime import datetime
+                    log_f.write(f"[{datetime.now().isoformat()}] SAVE FAILED: {e}\n")
+            except Exception:
+                pass
+            raise  # 重新抛出异常，让调用方知道失败了
 
     def set(self, section: str, key: str, value):
         """运行时修改配置值"""

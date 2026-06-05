@@ -10,6 +10,7 @@ export function DatabaseSettings() {
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<"success" | "fail" | null>(null);
 
@@ -52,18 +53,24 @@ export function DatabaseSettings() {
     clearTimeout(saveTimer.current);
     setSaving(true);
     setSaved(false);
+    setSaveError(false);
     try {
-      await api.updateConfig({
+      const resp = await api.updateConfig({
         db_host: host || null,
         db_port: parseInt(port) || null,
         db_database: database || null,
         db_user: user || null,
         db_password: password || null,
       });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch {
-      // ignore
+      if (resp.status === "ok") {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      } else {
+        setSaveError(true);
+      }
+    } catch (e) {
+      console.error("保存数据库配置失败:", e);
+      setSaveError(true);
     } finally {
       setSaving(false);
     }
@@ -153,7 +160,7 @@ export function DatabaseSettings() {
         <button
           onClick={handleSave}
           disabled={saving}
-          className="rounded-lg bg-accent-purple px-4 py-2 text-sm font-medium text-white hover:bg-accent-purple/90 disabled:opacity-50"
+          className={`rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-50 hover:opacity-90 ${saveError ? 'bg-red-600' : 'bg-accent-purple'}`}
         >
           {saving ? (
             <span className="flex items-center gap-2">
@@ -164,6 +171,11 @@ export function DatabaseSettings() {
             <span className="flex items-center gap-2">
               <CheckCircle size={14} />
               已保存
+            </span>
+          ) : saveError ? (
+            <span className="flex items-center gap-2">
+              <XCircle size={14} />
+              保存失败，请重试
             </span>
           ) : (
             "💾 保存设置"

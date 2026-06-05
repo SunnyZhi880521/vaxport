@@ -59,15 +59,16 @@ class LLMClient:
         # DashScope (阿里云百炼)
         aliyun_key = self.config.aliyun_api_key
         if aliyun_key:
+            base_url = self.config.aliyun_base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1"
             self._clients["aliyun"] = OpenAI(
-                base_url=self.config.aliyun_base_url,
+                base_url=base_url,
                 api_key=aliyun_key,
                 http_client=http_client,
             )
             self._states["aliyun"] = BackendState(
                 name="aliyun",
                 model=self.config.aliyun_model,
-                base_url=self.config.aliyun_base_url,
+                base_url=base_url,
                 api_key=aliyun_key,
             )
 
@@ -118,9 +119,52 @@ class LLMClient:
         """调用 /v1/models 获取该后端所有可用模型 ID 列表"""
         if backend_name not in self._clients:
             return []
-        client = self._clients[backend_name]
-        resp = client.models.list()
-        return sorted([m.id for m in resp.data])
+        state = self._states[backend_name]
+
+        # 方式一：OpenAI SDK
+        try:
+            client = self._clients[backend_name]
+            resp = client.models.list()
+            models = sorted([m.id for m in resp.data])
+            if models:
+                return models
+        except Exception as e:
+            import logging
+            logging.warning(f"list_models OpenAI SDK 失败 ({backend_name}): {e}")
+
+        # 方式二：httpx 直接调用（绕过 OpenAI SDK，解决 PyInstaller 打包兼容问题）
+        try:
+            import httpx as _httpx
+            url = f"{state.base_url}/models"
+            headers = {"Authorization": f"Bearer {state.api_key}"}
+            r = _httpx.Client(proxy=None, trust_env=False, timeout=15).get(url, headers=headers)
+            if r.status_code == 200:
+                data = r.json()
+                items = data.get("data", [])
+                models = sorted([m["id"] for m in items if "id" in m])
+                if models:
+                    return models
+        except Exception as e:
+            import logging
+            logging.warning(f"list_models httpx 直接调用失败 ({backend_name}): {e}")
+
+        # 方式三：静态常用模型列表
+        if backend_name == "aliyun":
+            configured = self.config.aliyun_model
+            common_models = [
+                "qwen3-max",
+                "qwen3-plus",
+                "qwen3-turbo",
+                "qwen-max",
+                "qwen-plus",
+                "qwen-turbo",
+            ]
+            if configured and configured not in common_models:
+                common_models.insert(0, configured)
+            return common_models
+        else:
+            configured = self.config.ollama_model
+            return [configured] if configured else []
 
     def set_model(self, backend_name: str, model_name: str) -> bool:
         """动态切换后端+模型"""

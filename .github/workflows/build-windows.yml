@@ -1,0 +1,108 @@
+name: Build Windows Installer
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r requirements.txt
+        shell: bash
+
+      - name: Build PyInstaller binary
+        run: |
+          pyinstaller vaxport.spec --clean --noconfirm
+
+          # 验证二进制存在且大小合理
+          if [ ! -f dist/vaxport-api.exe ]; then
+            echo "ERROR: PyInstaller binary not found"
+            exit 1
+          fi
+
+          SIZE=$(stat -f%z dist/vaxport-api.exe 2>/dev/null || stat -c%s dist/vaxport-api.exe)
+          echo "Binary size: $SIZE bytes"
+
+          if [ $SIZE -lt 400000000 ]; then
+            echo "ERROR: Binary too small ($SIZE bytes), expected > 400MB"
+            exit 1
+          fi
+
+          echo "PyInstaller build successful"
+        shell: bash
+
+      - name: Copy binary to Tauri
+        run: |
+          cp dist/vaxport-api.exe Vaxport-GUI/src-tauri/binaries/vaxport-api-x86_64-pc-windows-msvc.exe
+
+          if [ ! -f Vaxport-GUI/src-tauri/binaries/vaxport-api-x86_64-pc-windows-msvc.exe ]; then
+            echo "ERROR: Failed to copy binary to Tauri"
+            exit 1
+          fi
+
+          echo "Binary copied successfully"
+        shell: bash
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install frontend dependencies
+        run: |
+          cd Vaxport-GUI
+          npm install
+        shell: bash
+
+      - name: Build Tauri app
+        run: |
+          cd Vaxport-GUI/src-tauri
+          cargo install tauri-cli
+          cargo tauri build
+        shell: bash
+
+      - name: Verify output
+        run: |
+          MSI_PATH=$(ls Vaxport-GUI/src-tauri/target/release/bundle/msi/*.msi 2>/dev/null | head -1)
+
+          if [ -z "$MSI_PATH" ]; then
+            echo "ERROR: MSI file not found"
+            exit 1
+          fi
+
+          SIZE=$(stat -c%s "$MSI_PATH" 2>/dev/null || stat -f%z "$MSI_PATH")
+          echo "MSI size: $SIZE bytes"
+          echo "MSI path: $MSI_PATH"
+
+          if [ $SIZE -lt 400000000 ]; then
+            echo "ERROR: MSI too small ($SIZE bytes), expected > 400MB"
+            exit 1
+          fi
+
+          echo "Build successful!"
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vaxport-windows-x64
+          path: Vaxport-GUI/src-tauri/target/release/bundle/msi/*.msi
+          retention-days: 30

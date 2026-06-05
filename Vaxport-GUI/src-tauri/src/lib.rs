@@ -16,6 +16,31 @@ async fn check_backend() -> Result<bool, String> {
     }
 }
 
+fn kill_old_sidecar_on_port() {
+    // 检查端口 8931 是否被占用，如果是则 kill 旧进程
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        let output = Command::new("lsof")
+            .args(&["-ti:8931"])
+            .output()
+            .ok();
+        if let Some(out) = output {
+            let pids = String::from_utf8_lossy(&out.stdout);
+            for pid_str in pids.split_whitespace() {
+                if let Ok(pid) = pid_str.parse::<u32>() {
+                    let _ = Command::new("kill")
+                        .args(&["-9", &pid.to_string()])
+                        .output();
+                    log::info!("[vaxport] Killed old sidecar process: {}", pid);
+                }
+            }
+            // 等待进程退出
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    }
+}
+
 #[tauri::command]
 async fn start_backend(
     app: tauri::AppHandle,
@@ -26,6 +51,9 @@ async fn start_backend(
     if process_lock.is_some() {
         return Ok(());
     }
+
+    // 启动前清理旧进程
+    kill_old_sidecar_on_port();
 
     let sidecar = app
         .shell()

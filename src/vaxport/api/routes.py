@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from vaxport.api.server import _state, _db_name_map, _get_active_db_name
+from vaxport.api.server import _state, _db_name_map, _get_active_db_name, BUILD_VERSION
 from vaxport.config import Config, load_config
 
 router = APIRouter()
@@ -95,6 +95,7 @@ async def get_status():
         "pg_active_db": _get_active_db_name(),
         "pg_databases": sorted(_db_name_map.keys()) if _db_name_map else [],
         "version": _get_version(),
+        "build_version": BUILD_VERSION,
         "skills_count": app.skills.count if app.skills else 0,
         "tools_count": len(app.tools.list_tools()) if app.tools else 0,
         "debug_mode": app.debug_mode,
@@ -150,14 +151,32 @@ async def get_models():
     backend_status = llm.get_status()
     models = []
 
+    _log_path = Path.home() / ".vaxport" / "api.log"
+    try:
+        _log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(_log_path, "a") as _f:
+            _f.write(f"[{datetime.now().isoformat()}] /api/models called, backends={list(backend_status.keys())}\n")
+    except Exception:
+        pass
+
     for name, info in backend_status.items():
         # 去掉 " ← 当前" 标记
         clean_name = name.replace(" ← 当前", "")
         label = "阿里百炼" if clean_name == "aliyun" else "本地 Ollama"
         try:
             model_list = llm.list_models(clean_name)
-        except Exception:
+            try:
+                with open(_log_path, "a") as _f:
+                    _f.write(f"[{datetime.now().isoformat()}] list_models({clean_name}) returned {len(model_list)} models\n")
+            except Exception:
+                pass
+        except Exception as e:
             model_list = [info.get("model", "")]
+            try:
+                with open(_log_path, "a") as _f:
+                    _f.write(f"[{datetime.now().isoformat()}] list_models({clean_name}) EXCEPTION: {e}\n")
+            except Exception:
+                pass
         for m in model_list:
             if m:
                 models.append({
@@ -271,23 +290,19 @@ async def classify_query(req: dict):
 
 @router.get("/api/config")
 async def get_config():
-    """获取配置（敏感字段脱敏）"""
+    """获取配置"""
     if _state["app"] is None:
         raise HTTPException(status_code=503, detail="后端未初始化")
 
     cfg = _state["app"].config
     api_key = cfg.aliyun_api_key
-    masked_key = ""
-    if api_key and len(api_key) >= 8:
-        masked_key = api_key[:4] + "****" + api_key[-4:]
-    elif api_key:
-        masked_key = api_key[:4] + "****"
 
     return {
         "api": {
             "aliyun_model": cfg.aliyun_model,
             "aliyun_base_url": cfg.aliyun_base_url,
-            "aliyun_key": masked_key,
+            "aliyun_key": api_key,
+            "has_api_key": bool(api_key),
         },
         "local": {
             "ollama_url": cfg.ollama_url,
@@ -373,12 +388,112 @@ async def update_config(req: ConfigUpdateRequest):
         changed = True
     if req.db_password is not None:
         cfg.set("pg", "password", req.db_password)
+        # 同步更新 databases 数组中所有条目的密码
+        dbs = cfg._data.get("pg", {}).get("databases", [])
+        for db in dbs:
+            db["password"] = req.db_password
         changed = True
 
     if changed:
         cfg.save()
 
+        # 重新初始化受影响的组件
+        _reinit_after_config_change(cfg, req)
+
     return {"status": "ok"}
+
+
+def _reinit_after_config_change(cfg, req: ConfigUpdateRequest):
+    """配置变更后重新初始化相关组件"""
+    app = _state["app"]
+    if app is None:
+        return
+
+    need_llm_reload = (
+        req.api_key is not None
+        or req.model is not None
+        or req.backend is not None
+        or req.base_url is not None
+        or req.ollama_url is not None
+        or req.ollama_model is not None
+        or req.agent_model is not None
+        or req.auto_plan is not None
+        or req.plan_confirm is not None
+        or req.auto_qc is not None
+    )
+
+    need_db_reconnect = (
+        req.db_host is not None
+        or req.db_port is not None
+        or req.db_database is not None
+        or req.db_user is not None
+        or req.db_password is not None
+    )
+
+    try:
+        if need_llm_reload:
+            from vaxport.llm import create_llm_client
+            app.llm = create_llm_client(cfg)
+            # 写入日志
+            log_path = Path.home() / ".vaxport" / "api.log"
+            try:
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(log_path, "a") as f:
+                    f.write(f"[{datetime.now().isoformat()}] LLM reinitialized, active_backend={app.llm.active_backend}, active_model={app.llm.active_model}\n")
+            except Exception:
+                pass
+            # 更新 orchestrator 中的 LLM 客户端和配置
+            if app.orchestrator:
+                app.orchestrator.set_llm_client(app.llm)
+                app.orchestrator.auto_plan = cfg.auto_plan
+                app.orchestrator.plan_confirm = cfg.plan_confirm
+                app.orchestrator.auto_review = cfg.auto_review
+                # 同步 agent temperatures/models
+                for agent_name in ["task_assigner", "general", "analyze_reporter", "quality_supervision", "document_search"]:
+                    temp = cfg.get_agent_temperature(agent_name)
+                    model_id = cfg.get_agent_model(agent_name)
+                    app.orchestrator.update_agent_temperature(agent_name, temp)
+                    if model_id:
+                        app.orchestrator.update_agent_model(agent_name, model_id)
+    except Exception as e:
+        import logging
+        logging.error(f"LLM 重新初始化失败: {e}")
+
+    try:
+        if need_db_reconnect:
+            from vaxport.db import create_multi_database, create_database
+            # 先创建新连接，成功后再替换旧连接，避免旧连接被破坏
+            new_mdb = create_multi_database(cfg)
+            new_db = new_mdb.get_active() if new_mdb else None
+            if not new_mdb:
+                new_db = create_database(cfg)
+
+            if new_mdb and new_mdb.is_connected:
+                app.mdb = new_mdb
+                app.db = new_mdb.get_active()
+            elif new_db and new_db.is_connected:
+                app.mdb = None
+                app.db = new_db
+            else:
+                # 新连接失败，保留旧连接不变
+                return
+
+            # 更新 tools 的 db 引用
+            if app.tools and app.db and app.db.is_connected:
+                app.tools.db = app.db
+                if app.mdb and app.mdb.is_connected and len(app.mdb.names) > 1:
+                    for name in app.mdb.names:
+                        db = app.mdb.get(name)
+                        app.tools.discover_and_register(db=db, db_name=name)
+                elif app.db and app.db.is_connected:
+                    app.tools.discover_and_register()
+            # 更新 orchestrator 中的 db context
+            if app.orchestrator and app.db and app.db.is_connected:
+                db_overview = app._build_db_overview()
+                if db_overview:
+                    app.orchestrator.set_db_context(db_overview)
+    except Exception:
+        pass
 
 
 @router.post("/api/db/test")

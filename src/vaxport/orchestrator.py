@@ -786,3 +786,9 @@ class Orchestrator:
         agent = self._agents.get(agent_name)
         if agent:
             agent.temperature = temperature
+
+    def set_llm_client(self, llm_client):
+        """重新设置 LLM 客户端，同步更新 orchestrator 和所有 Agent 的引用。"""
+        self._llm = llm_client
+        for agent in self._agents.values():
+            agent.llm = llm_client

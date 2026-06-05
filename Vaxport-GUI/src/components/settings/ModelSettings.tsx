@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Eye, EyeOff, ChevronUp, ChevronDown, CheckCircle, Loader2 } from "lucide-react";
+import { Eye, EyeOff, ChevronUp, ChevronDown, CheckCircle, XCircle, Loader2 } from "lucide-react";
 import { api } from "../../lib/api";
 
 const AGENTS = [
@@ -34,6 +34,7 @@ export function ModelSettings() {
   // Save button states
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   // Debounce refs for text inputs
   const apiKeyTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -72,13 +73,17 @@ export function ModelSettings() {
   }, []);
 
   // 从后端获取可用模型列表
-  useEffect(() => {
+  const refreshModels = useCallback(() => {
     api.getModels().then((data) => {
       const models = (data.models as Array<{ model_id: string }>) || [];
       const ids = models.map((m) => m.model_id).filter(Boolean);
-      if (ids.length > 0) setAvailableModels(ids);
+      setAvailableModels(ids);
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    refreshModels();
+  }, [refreshModels]);
 
   const handleBackendChange = useCallback((b: "aliyun" | "local") => {
     setBackend(b);
@@ -94,9 +99,11 @@ export function ModelSettings() {
     setApiKey(v);
     clearTimeout(apiKeyTimer.current);
     apiKeyTimer.current = setTimeout(() => {
-      api.updateConfig({ api_key: v }).catch(() => {});
+      api.updateConfig({ api_key: v }).then(() => {
+        if (v) setTimeout(() => refreshModels(), 500);
+      }).catch(() => {});
     }, 800);
-  }, []);
+  }, [refreshModels]);
 
   const handleBaseUrlChange = useCallback((v: string) => {
     setBaseUrl(v);
@@ -153,8 +160,9 @@ export function ModelSettings() {
   const handleSaveAll = async () => {
     setSaving(true);
     setSaved(false);
+    setSaveError(false);
     try {
-      await api.updateConfig({
+      const resp = await api.updateConfig({
         api_key: apiKey || null,
         model: model || null,
         base_url: baseUrl || null,
@@ -165,10 +173,17 @@ export function ModelSettings() {
         plan_confirm: planConfirm,
         auto_qc: autoQc,
       });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch {
-      // ignore
+      if (resp.status === "ok") {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+        // 保存成功后刷新模型列表
+        setTimeout(() => refreshModels(), 500);
+      } else {
+        setSaveError(true);
+      }
+    } catch (e) {
+      console.error("保存设置失败:", e);
+      setSaveError(true);
     } finally {
       setSaving(false);
     }
@@ -373,7 +388,7 @@ export function ModelSettings() {
         <button
           onClick={handleSaveAll}
           disabled={saving}
-          className="rounded-lg bg-accent-purple px-4 py-2 text-sm font-medium text-white hover:bg-accent-purple/90 disabled:opacity-50"
+          className={`rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-50 hover:opacity-90 ${saveError ? 'bg-red-600' : 'bg-accent-purple'}`}
         >
           {saving ? (
             <span className="flex items-center gap-2">
@@ -384,6 +399,11 @@ export function ModelSettings() {
             <span className="flex items-center gap-2">
               <CheckCircle size={14} />
               已保存
+            </span>
+          ) : saveError ? (
+            <span className="flex items-center gap-2">
+              <XCircle size={14} />
+              保存失败，请重试
             </span>
           ) : (
             "💾 保存设置"

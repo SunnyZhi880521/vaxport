@@ -116,20 +116,21 @@ export default function App() {
 
   // Check backend on mount and start if needed
   useEffect(() => {
+    let cancelled = false;
     const initBackend = async () => {
       const isOnline = await checkBackendStatus();
       if (!isOnline) {
         await startBackend();
-        // Wait for backend to start
-        for (let i = 0; i < 10; i++) {
-          await new Promise(resolve => setTimeout(resolve, 500));
+        // 持续重试直到后端就绪
+        while (!cancelled) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          if (cancelled) return;
           const status = await checkBackendStatus();
           if (status) {
             setBackendOnline(true);
             return;
           }
         }
-        setBackendOnline(false);
       } else {
         setBackendOnline(true);
       }
@@ -138,6 +139,7 @@ export default function App() {
 
     // Cleanup on unmount
     return () => {
+      cancelled = true;
       stopBackend();
     };
   }, [setBackendOnline]);

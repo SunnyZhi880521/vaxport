@@ -12,7 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from vaxport.config import load_config
 from vaxport.cli import App
 
-# ── 全局状态（模块级，使用可变容器确保跨模块引用正确）─────
+BUILD_VERSION = "dev"
+
+# ── 全局状态（模块级，使用可变容器以确保跨模块引用正确）─────
 # 注意：必须使用 dict/list 等可变容器，因为 lifespan 会重新赋值 _app。
 # 如果直接 `_app = None`，其他模块 `from server import _app` 会得到 None 的快照。
 _state = {

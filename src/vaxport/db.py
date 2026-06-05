@@ -435,6 +435,7 @@ class MultiDatabase:
 
         # SSH 隧道：仅首次需要时建立
         tunnel_local_port = None
+        tunnel_db = None  # 初始化，避免 UnboundLocalError
         if self.config.ssh_tunnel_enabled and db_list:
             tunnel_db = Database(self.config)
             try:

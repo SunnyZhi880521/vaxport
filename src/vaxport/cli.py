@@ -58,6 +58,8 @@ class App:
 
         # 3. DB（可选，连接失败不中断启动；多数据库支持）
         pg_status = "未连接"
+        self.db = None
+        self.mdb = None
         try:
             self.mdb = create_multi_database(self.config)
             self.db = self.mdb.get_active()  # 向后兼容（当前工作库）
@@ -69,7 +71,10 @@ class App:
                 self.db = create_database(self.config)
                 pg_status = f"{self.config.pg_host}/{self.config.pg_database}"
             except Exception as e2:
-                ui.print_warning(f"数据库连接失败: {e2}\n部分功能不可用，可稍后重试。")
+                try:
+                    ui.print_warning(f"数据库连接失败: {e2}\n部分功能不可用，可稍后重试。")
+                except Exception:
+                    pass  # UI 输出失败不影响启动
 
         # 4. Tool Registry
         self.tools = ToolRegistry(db=self.db, skill_registry=self.skills)

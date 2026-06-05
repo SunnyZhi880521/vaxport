@@ -67,10 +67,14 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install pnpm
+        run: npm install -g pnpm
+        shell: bash
+
       - name: Install frontend dependencies
         run: |
           cd Vaxport-GUI
-          npm install
+          pnpm install
         shell: bash
 
       - name: Build Tauri app

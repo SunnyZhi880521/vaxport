@@ -1,6 +1,6 @@
 [package]
 name = "vaxport"
-version = "1.3.4"
+version = "1.3.5"
 description = "Vaxport - 疫苗企业数据分析终端"
 authors = ["you"]
 license = "MIT"

@@ -98,7 +98,7 @@ class App:
         # 注册 schema 列表工具（含空 schema）
         self.tools.register(
             name="list_all_schemas",
-            description="列出数据库中所有 schema 的名称、表数量、视图数量、物化视图数量。即使某个 schema 为空（表数为 0），也会显示。当你需要了解数据库中所有可用的 schema 时使用此工具。",
+            description="列出数据库中所有 schema 的名称、表数量、视图数量、物化视图数量。即使某个 schema 为空（表数为 0），也会显示。当你需要了解数据库中所有可用的 schema 时使用此工具。**注意**：如需查看某 schema 下具体表和记录数，请配合 query_* 工具使用。",
             parameters={},
             handler=lambda: (
                 json.dumps(
@@ -765,7 +765,7 @@ class App:
 
         self.tools.register(
             name="get_current_time",
-            description="获取当前日期和时间。返回包含日期、时间、Unix时间戳的JSON。当需要知道今天日期或生成含日期的文档/报告时使用。",
+            description="获取当前日期和时间。返回包含日期、时间、Unix时间戳的JSON。当需要知道今天日期或生成含日期的文档/报告时使用。**注意**：只返回系统当前时间，**不包含数据库中的时间范围信息**。查数据时间范围请用 query_* 工具。",
             parameters={},
             handler=lambda: json.dumps({
                 "datetime": datetime.now().isoformat(),
@@ -795,7 +795,7 @@ class App:
 
         self.tools.register(
             name="get_env_info",
-            description="获取当前运行环境信息(Python版本/平台/工作目录/数据库连接)。",
+            description="获取当前运行环境信息(Python版本/平台/工作目录/数据库连接)。**注意**：返回值为当前进程信息，**与数据库内容无关**。",
             parameters={},
             handler=lambda: json.dumps({
                 "python_version": __import__('sys').version,

@@ -83,15 +83,22 @@ SELECT * FROM control_chart_rules(
 
 | Schema | 用途 | 关键表 |
 |--------|------|--------|
+| analog_production | 各产品生产数据 | PEDV/PRRSV/APP/HPS/SS/COMBO/ECOLI/FLU 等产品的 production_batches, culture_log, harvest, formulation, semi_product |
 | analog_quality | 质量体系（跨产品） | deviations（偏差，含冷链异常）, final_product_qc（QC检验结果）, stability_study（稳定性研究）, capa_records（CAPA）, oos_records（OOS）, change_control（变更控制） |
-| analog_coldchain | 冷链物流 | transport_monitoring（运输温度监控） |
-| analog_pedv | PEDV 产品 | batch_production_record（批生产）, 及其他产品专属表 |
-| 其他产品 schema | 各产品线 | 结构与 analog_pedv 类似，具体表名见数据库概况 |
+| analog_coldchain | 冷链物流 | cold_storage_log（冷库温度监控）, transport_monitoring（运输温度监控） |
+| analog_warehouse | 仓储物料 | warehouse_monitoring（仓库环境监控）, material_inventory（物料库存） |
+| analog_pv | 药物警戒 | aefi_reports（疑似预防接种异常反应） |
+
+**流感疫苗数据**：
+- 表名前缀 `flu_`，位于 `analog_production` schema
+- 包含：flu_production_batches, flu_virus_culture_log, flu_harvest_inactivation, flu_formulation, flu_semi_product
+- 四价流感疫苗（A/H1N1, A/H3N2, B/Victoria, B/Yamagata）
 
 **查询技巧**：
 - 偏差记录的 deviation_type 字段区分类型：cold_chain_break（冷链中断）、cold_chain_failure（冷链失效）等
 - 跨产品查询时注意 schema 切换，不同产品数据在不同 schema
 - 运输温度数据在 analog_coldchain，不在各产品 schema
+- **查询数据时间范围**：直接查询表中的日期字段（如 start_date, test_date），不要调用 get_current_time
 
 ## 输出格式
 

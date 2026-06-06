@@ -79,6 +79,10 @@ def _value_similarity(v1, v2) -> float:
     return 0.0
 
 
+# 无参数工具白名单（不参与相似度检测，但仍参与连续相同检测）
+NO_PARAM_TOOLS = {"get_current_time", "get_env_info", "list_all_schemas"}
+
+
 def _args_similarity(args1: dict, args2: dict) -> float:
     """计算两个参数集的相似度（0.0~1.0）"""
     if not isinstance(args1, dict) or not isinstance(args2, dict):
@@ -199,6 +203,7 @@ class AgentLoopState:
         self._tool_result_cache: dict[str, str] = {}  # (tool_name, args_json) → result
         self._all_tool_calls_summary: list[dict] = []  # 已调用工具摘要列表
         self._recent_tool_params: list[tuple[str, dict]] = []  # [(tool_name, parsed_args), ...] 最近 N 次调用
+        self._active_corrections: list[str] = []  # 用户纠正指令（持久化）
 
 
 PLAN_PROMPT = """## 规划阶段（不可调用工具）
@@ -258,6 +263,42 @@ PLAN_PROMPT = """## 规划阶段（不可调用工具）
 - **禁止在计划中输出任何 SQL 语句、代码块或工具调用参数**。计划只描述"要做什么"，不包含具体实现
 - **禁止输出对话历史或回忆上一轮内容**。本阶段唯一任务是规划新问题，不要总结过去
 - 严格按照模板格式输出，从"### 一、任务理解"开始
+
+## 需求澄清规则（最高优先级）
+
+在执行任何工具调用前，先判断用户需求是否存在多个合理解读。如果是，计划的**第一步必须是"澄清"**：
+
+### 需要澄清的场景
+
+1. **关键词多义**：
+   - "数据时间范围" → A) 今天日期 B) 数据库数据跨度
+   - "列出所有表" → A) 数据库表结构 B) 业务数据概览
+   - "分析偏差" → A) 统计数量分布 B) 根因分析 C) 趋势异常
+
+2. **工具选择歧义**：
+   - 用户问"时间"但没说清楚是系统时间还是数据时间
+   - 用户问"有哪些数据"但没说清楚是 schema 列表还是具体产品
+
+3. **范围不明**：
+   - "查 PEDV 数据" → A) 最近 10 批 B) 全部历史 C) 特定时间段
+   - "分析质量" → A) 放行率 B) 偏差统计 C) 稳定性趋势
+
+### 澄清格式
+
+如果判断需要澄清，输出格式：
+
+```
+### 一、任务理解
+[用户需求] 存在多个合理解读，需要澄清
+
+### 二、澄清选项
+请选择您想要的具体含义：
+- **A)** [解读A的具体含义]
+- **B)** [解读B的具体含义]
+- **C)** [解读C的具体含义]（如有）
+```
+
+输出澄清后，**不要继续输出后续章节**，等待用户回复后再重新规划。
 
 现在开始规划用户的问题。"""
 
@@ -430,6 +471,12 @@ class Agent:
 - 查询工具返回的 JSON 中包含 rows 数组和 row_count
 - 如果查询返回空结果 (row_count=0)，告知用户未找到匹配数据
 - **数据完整性铁律**：零是有效数据，分组统计时零值项必须展示；你需要的额外数据自己直接查，禁止建议用户"查询更多数据""补充数据"
+- **工具使用原则**：
+  - 查询数据库中的数据时间范围、产品列表、批次数量等，必须使用数据库查询工具（query_*），不要调用 get_current_time（它只返回当前日期，不包含数据库内容）
+  - **环境工具只调一次**：get_current_time/get_env_info/list_all_schemas 通常一整个会话只调 1 次，不要重复调用
+  - **数据库工具用于查数据**：回答"数据时间范围""产品列表""批次数量"等问题时，必须用 query_* 工具
+- **思考后执行**：调用工具前，先用 1-2 句话说明你要查什么、为什么要查。如果用户已经给过明确指示，先复述确认
+- **遇歧义先澄清**：如果用户需求有多个合理解读（如"时间范围"可能指今天日期或数据库数据跨度），先向用户澄清，不要猜
 - **对话连续性**：你运行在对话式终端中，用户可能连续提问、追问、补充。将每次交互视为持续对话的一部分，而非孤立的问题
 - **输出完整性**：如果用户的追问/补充针对上一轮回答，最终输出必须是融合后的完整报告，而非仅新增片段。用户应得到自包含的完整答案
 - 无需在回答中重复完整的表格数据，概括关键发现即可"""
@@ -567,6 +614,52 @@ class Agent:
         rebuilt.extend(recent_messages)
 
         return rebuilt
+
+    @staticmethod
+    def _extract_user_corrections(user_msg: str) -> list[str]:
+        """从用户消息中提取纠正指令。
+
+        检测用户是否在纠正 Agent 的行为，如"不要用 get_current_time"、"别用XX工具"等。
+
+        Returns:
+            提取到的纠正指令列表，可能为空
+        """
+        corrections = []
+        # 纠正模式
+        patterns = [
+            (r"(不要?用|别用|不用|停止使用)\s*(\w+)", "不要使用 {1}"),
+            (r"(不要|禁止)\s*(\w+)\s*(工具|命令)", "不要使用 {1} {2}"),
+            (r"我(提示|说|告诉)过你(不要|别)\s*(\w+)", "用户已提示不要使用 {2}"),
+        ]
+        for pattern, template in patterns:
+            matches = re.findall(pattern, user_msg)
+            for match in matches:
+                if isinstance(match, tuple):
+                    # 取非空的捕获组
+                    tool_name = next((m for m in match[1:] if m), "工具")
+                    correction = template.replace("{1}", tool_name).replace("{2}", tool_name)
+                    corrections.append(correction)
+        # 如果检测到纠正模式，返回原始消息的前 100 字符作为纠正指令
+        if corrections:
+            return [f"用户明确要求：{user_msg[:100]}"]
+        return []
+
+    @staticmethod
+    def _plan_needs_clarification(plan_text: str) -> bool:
+        """检查计划是否以澄清开头，需要用户选择。
+
+        Returns:
+            True if plan needs user clarification before execution
+        """
+        if not plan_text:
+            return False
+        # 取前 10 行检查
+        lines = plan_text.strip().split("\n")[:10]
+        text = " ".join(lines)
+        # 检查是否包含澄清关键词
+        has_clarify_keyword = "澄清" in text or "多个合理解读" in text
+        has_options = ("A)" in text or "- **A)**" in text or "请选择" in text)
+        return has_clarify_keyword and has_options
 
     def _generate_plan(self, user_query: str, history: list[dict] | None = None,
                        callbacks: ProgressCallbacks | None = None) -> str:
@@ -993,9 +1086,35 @@ class Agent:
 
             # 记录到摘要列表（用于上下文注入）
             if state:
+                # 构建结果摘要
+                result_summary = ""
+                if isinstance(result_data, dict):
+                    if "error" in result_data:
+                        result_summary = f"错误: {str(result_data['error'])[:50]}"
+                    elif "row_count" in result_data:
+                        result_summary = f"返回{result_data['row_count']}行"
+                    elif "file_path" in result_data:
+                        result_summary = "生成图表"
+                    else:
+                        result_summary = "成功"
+                else:
+                    result_summary = "成功"
+
+                # 检查是否与上一次调用重复（工具名+参数键相同）
+                is_duplicate = False
+                if state._all_tool_calls_summary:
+                    last = state._all_tool_calls_summary[-1]
+                    if last["tool"] == tool_name:
+                        last_keys = set(last["args_keys"])
+                        curr_keys = set(arguments.keys()) if isinstance(arguments, dict) else set()
+                        if last_keys == curr_keys:
+                            is_duplicate = True
+
                 state._all_tool_calls_summary.append({
                     "tool": tool_name,
                     "args_keys": list(arguments.keys()) if isinstance(arguments, dict) else [],
+                    "result_summary": result_summary,
+                    "is_duplicate": is_duplicate,
                 })
 
             result = truncate_tool_result(result)
@@ -1430,6 +1549,16 @@ class Agent:
                     "role": "system",
                     "content": FOLLOWUP_MODE_PROMPT,
                 })
+            # 澄清检测: 计划以澄清开头 → 输出澄清问题，不调工具，直接返回
+            elif plan_text and self._plan_needs_clarification(plan_text):
+                return {
+                    "answer": plan_text,
+                    "needs_user_input": True,
+                    "turns": 0, "tokens_used": 0, "context_window": self._get_context_window(),
+                    "token_pct": 0, "sql_queries": [], "model": self.preferred_model or self.llm.active_model,
+                    "backend": self.llm.active_backend, "compressions": 0,
+                    "agent_type": "", "agent_chain": [],
+                }
             elif plan_text and self._plan_confirm:
                 if not callbacks.on_plan(plan_text):
                     return {
@@ -1451,6 +1580,20 @@ class Agent:
 
         state = AgentLoopState()
         self._state = state
+
+        # 检测用户纠正指令并持久化
+        corrections = self._extract_user_corrections(user_query)
+        if corrections:
+            state._active_corrections.extend(corrections)
+
+        # 如果有纠正指令，注入到消息历史
+        if state._active_corrections:
+            corrections_text = "\n".join(state._active_corrections)
+            messages.append({
+                "role": "system",
+                "content": f"⚠️ 用户近期明确指令（必须严格遵守）：\n{corrections_text}",
+            })
+
         tool_definitions = [] if plan_mode else self.tools.get_tool_definitions()
 
         # 工具子集过滤
@@ -1585,13 +1728,16 @@ class Agent:
                 injected = False
                 if state._all_tool_calls_summary:
                     summary_lines = []
-                    for s in state._all_tool_calls_summary:
+                    # 只取最近 5 次，避免过长
+                    for s in state._all_tool_calls_summary[-5:]:
                         keys = ", ".join(s["args_keys"]) if s["args_keys"] else "无参数"
-                        summary_lines.append(f"- {s['tool']}({keys})")
+                        dup_marker = " ⚠️ 重复" if s.get("is_duplicate") else ""
+                        result_info = f" → {s.get('result_summary', '')}" if s.get("result_summary") else ""
+                        summary_lines.append(f"- {s['tool']}({keys}){result_info}{dup_marker}")
                     summary_text = (
-                        "以下是本轮对话中你已经调用过的工具列表。"
-                        "请勿重复调用相同工具+相同参数，如需相同数据请直接使用已有结果。\n"
+                        "以下是本轮对话中你最近的工具调用记录：\n"
                         + "\n".join(summary_lines)
+                        + "\n\n注意：避免重复调用相同工具+相同参数。如需相同数据请直接使用已有结果。"
                     )
                     messages.append({"role": "system", "content": summary_text})
                     injected = True
@@ -1625,7 +1771,7 @@ class Agent:
                         final_answer = "⚠️ 检测到工具调用在 A→B→A 模式间切换，已中断。"
                         break
 
-                    # 2. 连续相同调用检测
+                    # 2. 连续相同调用检测（渐进式）
                     for tc in tool_calls_list:
                         sig_key = (tc.function.name, tc.function.arguments)
                         if state._last_tool_call_sig == sig_key:
@@ -1633,13 +1779,59 @@ class Agent:
                         else:
                             state._consecutive_same_count = 1
                         state._last_tool_call_sig = sig_key
-                        if state._consecutive_same_count >= 5:
-                            final_answer = f"⚠️ 工具 {tc.function.name} 连续 {state._consecutive_same_count} 次使用相同参数调用，已中断。"
-                            break
+
+                        count = state._consecutive_same_count
+                        tool_name = tc.function.name
+
+                        # 无参数工具特殊处理（2次提醒，5次中断）
+                        if tool_name in NO_PARAM_TOOLS:
+                            if count == 2:
+                                messages.append({
+                                    "role": "system",
+                                    "content": f"⚠️ 提醒：{tool_name} 已被调用 {count} 次。"
+                                              f"该工具返回的是系统/环境信息，通常一次即可。"
+                                              f"请确认是否真的需要再次调用，或考虑使用 query_* 工具查询数据库数据。",
+                                })
+                            elif count >= 5:
+                                final_answer = (
+                                    f"⚠️ 工具 {tool_name} 连续 {count} 次调用，已中断。\n"
+                                    f"建议：1) 该工具返回的是系统信息，通常一次即可；"
+                                    f"2) 如需查询数据库数据，请使用 query_* 工具；"
+                                    f"3) 向用户澄清具体需求。"
+                                )
+                                break
+                        else:
+                            # 普通工具：2次提醒，3次警告，5次中断
+                            if count == 2:
+                                messages.append({
+                                    "role": "system",
+                                    "content": f"⚠️ 提醒：{tool_name} 已连续调用 {count} 次（相同参数）。"
+                                              f"请确认是否需要再次调用，或考虑使用不同参数/工具。",
+                                })
+                            elif count == 3:
+                                messages.append({
+                                    "role": "system",
+                                    "content": f"⚠️ 警告：{tool_name} 已连续调用 {count} 次（相同参数）！"
+                                              f"建议：1) 检查是否已获取足够数据；"
+                                              f"2) 改用其他工具如 query_* 查询不同维度；"
+                                              f"3) 向用户澄清具体需求。",
+                                })
+                            elif count >= 5:
+                                final_answer = (
+                                    f"⚠️ 工具 {tool_name} 连续 {count} 次使用相同参数调用，已中断。\n"
+                                    f"建议：1) 检查是否已获取足够数据，直接使用已有结果；"
+                                    f"2) 改用其他工具查询不同维度；"
+                                    f"3) 向用户澄清具体需求。"
+                                )
+                                break
 
                     # 3. 渐进式相似度检测（同工具、仅微调参数）
                     if not final_answer:
                         for tc in tool_calls_list:
+                            # 无参数工具不参与相似度检测
+                            if tc.function.name in NO_PARAM_TOOLS:
+                                continue
+
                             try:
                                 cur_args = json.loads(tc.function.arguments)
                             except json.JSONDecodeError:

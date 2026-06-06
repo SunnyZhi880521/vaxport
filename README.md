@@ -10,9 +10,9 @@
 
 | 平台 | 下载 |
 |------|------|
-| macOS | [Vaxport_1.3.0_aarch64.dmg](https://github.com/SunnyZhi880521/vaxport/releases/latest) |
-| Windows | [Vaxport_1.3.0_x64.msi](https://github.com/SunnyZhi880521/vaxport/releases/latest) |
-| Linux | [Vaxport_1.3.0_amd64.deb](https://github.com/SunnyZhi880521/vaxport/releases/latest) |
+| macOS | [Vaxport_1.3.5_aarch64.dmg](https://github.com/SunnyZhi880521/vaxport/releases/latest) |
+| Windows | [Vaxport_1.3.5_x64_en-US.msi](https://github.com/SunnyZhi880521/vaxport/releases/latest) |
+| Linux | [Vaxport_1.3.5_amd64.deb](https://github.com/SunnyZhi880521/vaxport/releases/latest) |
 
 > 最新版本和安装包可在 [GitHub Releases](https://github.com/SunnyZhi880521/vaxport/releases) 页面下载。
 
@@ -1037,6 +1037,14 @@ GeneralAgent → [HANDOFF:analyze_reporter]
 - **上下文压缩**：超 75% 窗口触发 · 保留最近 3 轮对话
 
 ## 版本历史
+
+### v1.3.5 (2026-06-06)
+
+- **需求澄清机制**: Agent 执行前自动判断需求是否存在多个合理解读，有歧义时先向用户澄清
+- **工具使用优化**: 新增无参数工具白名单（get_current_time/get_env_info/list_all_schemas），防止重复调用环境工具
+- **Schema 文档完善**: 新增 analog_production/warehouse/pv schema 说明，新增流感疫苗数据结构描述
+- **工具描述增强**: list_all_schemas/get_current_time/get_env_info 增加使用边界说明，减少误用
+- **版本统一**: pyproject.toml/Tauri/Cargo 版本号统一更新至 1.3.5
 
 ### v1.3.0 (2026-06-03)
 

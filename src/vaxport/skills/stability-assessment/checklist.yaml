@@ -1,0 +1,45 @@
+# stability-assessment SKILL 检查清单
+
+name: stability-assessment
+version: 1.1.0
+
+required_steps:
+  - name: data_collection
+    description: 获取稳定性研究数据
+    keywords: ["稳定性", "时间点", "长期", "加速", "效价"]
+
+  - name: trend_fitting
+    description: 建立衰减模型
+    keywords: ["回归", "斜率", "R²", "衰减", "拟合"]
+
+  - name: shelf_life_prediction
+    description: 推算预测效期
+    keywords: ["效期", "预测", "90%", "推算", "外推"]
+
+  - name: anomaly_detection
+    description: 标记异常
+    keywords: ["跌破", "低于", "异常", "不合格"]
+
+required_sections:
+  - name: "数据概览"
+    aliases: ["概览", "数据总览", "数据覆盖", "稳定性数据"]
+  - name: "趋势"
+    aliases: ["趋势", "衰减趋势", "趋势分析", "趋势拟合"]
+  - name: "效期"
+    aliases: ["效期", "有效期", "预测效期", "货架期", "shelf life"]
+  - name: "结论"
+    aliases: ["结论", "建议", "综合评价", "总结"]
+
+required_charts:
+  - "稳定性趋势图"
+
+forbidden_patterns:
+  - pattern: "预测.*效期.*(10|20|30).*年"
+    message: "禁止不合理外推"
+  - pattern: "效期.*确定.*是"
+    message: "禁止过于确定的效期结论（应标注不确定性）"
+
+judgment_standards:
+  shelf_life_threshold: "90% of release spec"
+  min_r_squared: 0.7
+  max_extrapolation_ratio: 2.0

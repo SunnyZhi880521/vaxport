@@ -35,6 +35,7 @@ class StepRecord:
     success: bool
     token_usage: int = 0
     timestamp: float = field(default_factory=lambda: __import__("time").time())
+    section: str = ""  # generate_chart 的章节归属，用于 per-section 限图
 
 
 class GuardRails:
@@ -46,11 +47,13 @@ class GuardRails:
         max_total_steps: int = 20,
         token_budget: int = 50000,
         loop_window: int = 5,
+        max_charts_per_section: int = 5,
     ):
         self.max_retries = max_retries
         self.max_total_steps = max_total_steps
         self.token_budget = token_budget
         self.loop_window = loop_window
+        self.max_charts_per_section = max_charts_per_section
 
         # SQL安全检查模式
         self.dangerous_patterns = [
@@ -189,6 +192,27 @@ class GuardRails:
             return RegulationAction(
                 action="force_conclude",
                 message=f"已达{self.max_total_steps}步上限，请基于现有结果给出结论",
+            )
+
+        # 1.5 per-section 图表上限（SKILL 收敛约束）
+        from collections import Counter
+        chart_sections = Counter(
+            s.section for s in history
+            if s.tool_name == "generate_chart" and s.section
+        )
+        for section, count in chart_sections.items():
+            if count > self.max_charts_per_section:
+                return RegulationAction(
+                    action="break_loop",
+                    message=f"章节'{section}'已生成{count}张图表，超出每章节{self.max_charts_per_section}张上限。请停止为该章节生成新图表，进入下一个分析步骤或撰写结论。",
+                )
+
+        # 1.6 图表总量上限（全局兜底）
+        chart_count = sum(1 for s in history if s.tool_name == "generate_chart")
+        if chart_count >= 15:
+            return RegulationAction(
+                action="break_loop",
+                message=f"已生成{chart_count}张图表，请停止生成新图表并开始撰写分析结论",
             )
 
         # 2. 死循环检测（最近loop_window步内）

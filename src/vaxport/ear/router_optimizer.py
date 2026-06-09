@@ -47,11 +47,11 @@ class RouterOptimizer:
 
         # 按task_type分组，找成功率最高的Agent
         cursor = conn.execute(
-            """SELECT agent_assigned, COUNT(*) as count, AVG(success) as success_rate
+            """SELECT rd.agent_assigned, COUNT(*) as count, AVG(rd.success) as success_rate
             FROM routing_decisions rd
             JOIN trajectories t ON rd.task_id = t.task_id
             WHERE t.task_type = ?
-            GROUP BY agent_assigned
+            GROUP BY rd.agent_assigned
             HAVING count >= 5
             ORDER BY success_rate DESC, count DESC
             LIMIT 1""",

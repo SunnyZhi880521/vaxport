@@ -1,12 +1,16 @@
 """ReAct Agent 引擎 — Think → Act → Observe 循环 + 自动上下文压缩"""
 
 import json
+import logging
 import os
 import re
 import signal
 import subprocess
 import threading
 import time
+import uuid
+
+logger = logging.getLogger(__name__)
 from typing import Optional
 
 from vaxport.context import (
@@ -221,9 +225,9 @@ PLAN_PROMPT = """## 规划阶段（不可调用工具）
 [用一句话概括用户需求]
 
 ### 二、数据需求
-| 序号 | 表名(schema.table) | 查询条件 | 目的 |
-|------|-------------------|---------|------|
-| 1 | ... | WHERE ... | 获取... |
+| 序号 | 表名(schema.table) | 查询条件 | 聚合方式 | 目的 |
+|------|-------------------|---------|---------|------|
+| 1 | ... | WHERE ... | GROUP BY + COUNT/AVG | 获取... |
 
 ### 三、执行步骤
 | 步骤 | 操作类型 | 工具名称 | 关键参数 | 预期产出 |
@@ -850,6 +854,75 @@ class Agent:
         except (json.JSONDecodeError, KeyError):
             return []
 
+    def _try_deep_research(self, plan_text: str,
+                          callbacks: ProgressCallbacks) -> str | None:
+        """尝试 Deep Research 聚合采集。成功返回摘要文本，失败返回 None（回退到串行SQL）。"""
+        from vaxport.deep_research import DeepResearchCollector, DeepResearchPlan, build_research_summary
+
+        if not self.tools.db or not self.tools.db.is_connected:
+            return None
+
+        # 从计划文本中提取结构化数据定位
+        tables_needed = self._extract_tables_from_plan_as_dr(plan_text)
+        if not tables_needed:
+            return None
+
+        plan = DeepResearchPlan(tables_needed=tables_needed, task_id=str(uuid.uuid4())[:8])
+
+        try:
+            callbacks.on_thinking("⏳ Deep Research 聚合采集...")
+            collector = DeepResearchCollector(self.tools.db)
+            results = collector.collect(plan)
+
+            if not results:
+                logger.info("Deep Research: 采集无结果，回退到串行SQL")
+                return None
+
+            # 检查是否有有效结果（非全失败）
+            success_count = sum(1 for r in results.values() if not r.error)
+            if success_count == 0:
+                logger.info("Deep Research: 全表失败，回退到串行SQL")
+                return None
+
+            summary = build_research_summary(results)
+            logger.info(f"Deep Research: 成功采集 {success_count}/{len(results)} 张表")
+            return summary
+
+        except Exception as e:
+            logger.warning(f"Deep Research 异常: {e}, 回退到串行SQL")
+            return None
+
+    def _extract_tables_from_plan_as_dr(self, plan_text: str) -> list:
+        """从 auto_plan 计划文本中提取表名，转换为 DeepResearch TablePlan 列表。"""
+        from vaxport.deep_research import TablePlan
+
+        tables = []
+        # 从"数据需求"表格行中提取 schema.table
+        # 格式：| 序号 | schema.table | WHERE条件 | 聚合方式 | 目的 |
+        for line in plan_text.split("\n"):
+            line = line.strip()
+            if not line.startswith("|") or line.startswith("|--") or line.startswith("| 序号"):
+                continue
+            parts = [p.strip() for p in line.split("|")]
+            # 过滤空元素
+            parts = [p for p in parts if p]
+            if len(parts) >= 2:
+                # 第二列通常是表名 (schema.table)
+                table_name = parts[1] if len(parts) > 1 else ""
+                if "." in table_name and not table_name.startswith("序号"):
+                    schema, table = table_name.split(".", 1)
+                    key_filter = parts[2] if len(parts) > 2 else ""
+                    aggregate_hint = parts[3] if len(parts) > 3 else ""
+                    why = parts[4] if len(parts) > 4 else ""
+                    tables.append(TablePlan(
+                        schema=schema.strip(), table=table.strip(),
+                        key_filter=key_filter.strip(),
+                        aggregate_hint=aggregate_hint.strip(),
+                        why=why.strip(),
+                    ))
+
+        return tables
+
     def _execute_sql_batch(self, queries: list[dict],
                             callbacks: ProgressCallbacks,
                             sql_log: list) -> str:
@@ -1074,10 +1147,12 @@ class Agent:
 
                 # EAR Guard Rails: 记录轨迹并监控
                 success = "error" not in result_data if isinstance(result_data, dict) else True
+                section = arguments.get("section", "") if isinstance(arguments, dict) else ""
                 self._trajectory_history.append(StepRecord(
                     tool_name=tool_name,
                     arguments=arguments,
                     success=success,
+                    section=section,
                 ))
                 regulation = self.tools.guard_rails.monitor_trajectory(self._trajectory_history)
                 if regulation.action != "continue":
@@ -1485,7 +1560,7 @@ class Agent:
 
     def run(self, user_query: str, callbacks: ProgressCallbacks = None,
             plan_mode: bool = False, history: list[dict] | None = None,
-            cancel_event=None) -> dict:
+            cancel_event=None, extra_system_prompt: str = None) -> dict:
         """执行 Agent 循环，返回最终回答和元数据
 
         Args:
@@ -1494,11 +1569,14 @@ class Agent:
             plan_mode: 规划模式 (True=纯文本对话不调工具)
             history: 对话历史 [{"role": "user/assistant", "content": "..."}]
             cancel_event: threading.Event，set 后取消执行
+            extra_system_prompt: 额外注入的 system prompt（如 SKILL 指导）
         """
         if callbacks is None:
             callbacks = ProgressCallbacks()
 
         system_prompt = self._system_prompt
+        if extra_system_prompt:
+            system_prompt += "\n\n" + extra_system_prompt
         if plan_mode:
             system_prompt += (
                 "\n\n## 当前模式：规划讨论\n"
@@ -1607,76 +1685,82 @@ class Agent:
         final_answer = ""
         context_window = self._get_context_window()
 
-        # ── 批量数据采集阶段 (Plan → SQL → 代码直接执行, 无需 ReAct) ──
+        # ── 数据采集阶段 ──
+        # 优先尝试 Deep Research 聚合采集，失败则回退到串行 SQL 批量
         if plan_text and self._auto_plan and not plan_mode:
-            callbacks.on_thinking("📋 生成 SQL 查询...")
-            sql_queries = self._generate_sql_queries(plan_text)
-            batch_result_text = ""
-            if sql_queries:
-                batch_result_text = self._execute_sql_batch(sql_queries, callbacks, sql_log) or ""
-                if batch_result_text:
-                    messages.append({"role": "system", "content": batch_result_text})
+            # 尝试 Deep Research
+            deep_research_result = self._try_deep_research(plan_text, callbacks)
+            if deep_research_result:
+                messages.append({"role": "system", "content": deep_research_result})
+            else:
+                # 回退到串行 SQL 批量采集
+                callbacks.on_thinking("📋 生成 SQL 查询...")
+                sql_queries = self._generate_sql_queries(plan_text)
+                batch_result_text = ""
+                if sql_queries:
+                    batch_result_text = self._execute_sql_batch(sql_queries, callbacks, sql_log) or ""
+                    if batch_result_text:
+                        messages.append({"role": "system", "content": batch_result_text})
 
-            # ── 数据充分性检查 ──
-            if sql_queries:
-                sufficiency_result = self._check_data_sufficiency(
-                    plan_text, sql_queries, sql_log,
-                    batch_result_text if batch_result_text else "",
-                )
-                if isinstance(sufficiency_result, dict) and sufficiency_result.get("result") == "INSUFFICIENT_FORCE":
-                    missing_sqls = sufficiency_result.get("missing_queries", [])
-                    if missing_sqls:
-                        callbacks.on_thinking(
-                            f"⚠️ 数据不足，补查 {len(missing_sqls)} 条..."
-                        )
-                        supplement_text = self._execute_sql_batch(
-                            missing_sqls, callbacks, sql_log
-                        )
-                        if supplement_text:
+                # ── 数据充分性检查 ──
+                if sql_queries:
+                    sufficiency_result = self._check_data_sufficiency(
+                        plan_text, sql_queries, sql_log,
+                        batch_result_text if batch_result_text else "",
+                    )
+                    if isinstance(sufficiency_result, dict) and sufficiency_result.get("result") == "INSUFFICIENT_FORCE":
+                        missing_sqls = sufficiency_result.get("missing_queries", [])
+                        if missing_sqls:
+                            callbacks.on_thinking(
+                                f"⚠️ 数据不足，补查 {len(missing_sqls)} 条..."
+                            )
+                            supplement_text = self._execute_sql_batch(
+                                missing_sqls, callbacks, sql_log
+                            )
+                            if supplement_text:
+                                messages.append({
+                                    "role": "system",
+                                    "content": (
+                                        "## 补充数据采集（数据完整性检查后追加）\n\n"
+                                        f"{supplement_text}"
+                                    ),
+                                })
+                    elif sufficiency_result == "INSUFFICIENT_LLM":
+                        plan_tables = self._extract_tables_from_plan(plan_text)
+                        sql_tables: set[str] = set()
+                        for q in sql_queries:
+                            sql_tables.update(
+                                self._extract_tables_from_sql(q.get("sql", ""))
+                            )
+                        matched = set()
+                        for pt in plan_tables:
+                            for st in sql_tables:
+                                if self._table_name_match(pt, st):
+                                    matched.add(pt)
+                                    break
+                        missing = plan_tables - matched
+                        if missing:
                             messages.append({
                                 "role": "system",
                                 "content": (
-                                    "## 补充数据采集（数据完整性检查后追加）\n\n"
-                                    f"{supplement_text}"
+                                    "⚠️ 以下表在计划中列出但未被查询，请确认是否需要补查：\n"
+                                    f"{', '.join(sorted(missing))}\n"
+                                    "如果确认不需要，请继续分析。"
                                 ),
                             })
-                elif sufficiency_result == "INSUFFICIENT_LLM":
-                    # 缺失 1 张表但 LLM 判充分 → 注入警告
-                    plan_tables = self._extract_tables_from_plan(plan_text)
-                    sql_tables: set[str] = set()
-                    for q in sql_queries:
-                        sql_tables.update(
-                            self._extract_tables_from_sql(q.get("sql", ""))
-                        )
-                    matched = set()
-                    for pt in plan_tables:
-                        for st in sql_tables:
-                            if self._table_name_match(pt, st):
-                                matched.add(pt)
-                                break
-                    missing = plan_tables - matched
-                    if missing:
-                        messages.append({
-                            "role": "system",
-                            "content": (
-                                "⚠️ 以下表在计划中列出但未被查询，请确认是否需要补查：\n"
-                                f"{', '.join(sorted(missing))}\n"
-                                "如果确认不需要，请继续分析。"
-                            ),
-                        })
 
-            # ── 部分失败降级标注 ──
-            if batch_result_text and "❌" in batch_result_text:
-                messages.append({
-                    "role": "system",
-                    "content": (
-                        "⚠️ 【系统强制警告 — 数据完整性】上述批量查询中有部分失败。\n"
-                        "你的回答必须包含一节 '## 数据完整性说明'，明确说明：\n"
-                        "1. 哪些分析部分因数据缺失无法完成\n"
-                        "2. 哪些结论是基于现有数据可确认的\n"
-                        "禁止用已有数据推测缺失数据部分的结论。"
-                    ),
-                })
+                # ── 部分失败降级标注 ──
+                if batch_result_text and "❌" in batch_result_text:
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            "⚠️ 【系统强制警告 — 数据完整性】上述批量查询中有部分失败。\n"
+                            "你的回答必须包含一节 '## 数据完整性说明'，明确说明：\n"
+                            "1. 哪些分析部分因数据缺失无法完成\n"
+                            "2. 哪些结论是基于现有数据可确认的\n"
+                            "禁止用已有数据推测缺失数据部分的结论。"
+                        ),
+                    })
 
             messages.append({"role": "system", "content": ANALYSIS_PROMPT})
             callbacks.on_thinking("📊 分析阶段")

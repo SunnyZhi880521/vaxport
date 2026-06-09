@@ -1,0 +1,40 @@
+# deviation-analysis SKILL 检查清单
+
+name: deviation-analysis
+version: 1.1.0
+
+required_steps:
+  - name: deviation_overview
+    description: 获取偏差全貌
+    keywords: ["偏差", "总数", "分级", "严重", "主要", "次要", "总览", "概览", "概述"]
+
+  - name: pareto_analysis
+    description: 帕累托分析
+    keywords: ["帕累托", "Top", "累计", "占比", "排序", "分类", "主要类型"]
+
+  - name: capa_analysis
+    description: CAPA 关联分析
+    keywords: ["CAPA", "完成率", "有效性", "复发", "闭环", "纠正", "预防"]
+
+  - name: trend_analysis
+    description: 趋势分析
+    keywords: ["趋势", "变化", "升", "降", "月度", "时间线", "周期"]
+
+required_sections:
+  - name: "偏差总览"
+    aliases: ["总览", "概览", "概述", "事件总览", "偏差统计"]
+  - name: "分类/排序分析"
+    aliases: ["帕累托", "Top", "排序", "分类", "占比", "主要类型", "类型分布"]
+  - name: "结论与建议"
+    aliases: ["结论", "建议", "综合评价", "总结", "改进建议", "评级"]
+
+required_charts:
+  - "帕累托图"
+
+forbidden_patterns:
+  - pattern: "CAPA.*有效.*没有问题"
+    message: "禁止无数据支持断言CAPA有效"
+
+judgment_standards:
+  pareto_top3_coverage: "60-80%"
+  capa_ontime_rate_target: "90%"

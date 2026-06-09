@@ -209,7 +209,7 @@ class ToolRegistry:
 
         # Agent → 工具名模式
         FILTER_MAP = {
-            "analyze_reporter": {"query_", "detect_anomaly", "generate_report", "generate_chart"},
+            "analyze_reporter": {"query_", "detect_anomaly", "generate_report", "generate_chart", "run_statistics", "deep_research_collect"},
             "quality_supervision": {"query_", "generate_chart"},
             "document_search": {"search_documents", "index_documents", "generate_chart"},
         }
@@ -329,3 +329,43 @@ class ToolRegistry:
                     },
                     handler=make_skill_handler(script_path, skill_name),
                 )
+
+    def register_deep_research(self):
+        """注册 deep_research_collect 工具"""
+        from vaxport.deep_research import DeepResearchCollector, DeepResearchPlan, build_research_summary
+
+        def handler(plan_json: str = "{}") -> str:
+            """执行 Deep Research 聚合采集"""
+            if not self.db or not self.db.is_connected:
+                return json.dumps({"error": "数据库未连接"}, ensure_ascii=False)
+
+            plan = DeepResearchPlan.from_json(plan_json)
+            if not plan or not plan.tables_needed:
+                return json.dumps({"error": "计划解析失败或无表需要采集"}, ensure_ascii=False)
+
+            collector = DeepResearchCollector(self.db)
+            results = collector.collect(plan)
+            if not results:
+                return json.dumps({"error": "采集无结果"}, ensure_ascii=False)
+
+            summary = build_research_summary(results)
+            # 也返回结构化数据供 Agent 按需回查
+            detail = {k: v.to_dict() for k, v in results.items()}
+            return json.dumps({
+                "summary": summary,
+                "detail": detail,
+                "task_id": plan.task_id,
+            }, ensure_ascii=False, default=str)
+
+        self.register(
+            name="deep_research_collect",
+            description="Deep Research 聚合采集工具。按结构化数据定位计划并发执行聚合SQL，返回统计摘要而非原始数据。适用于复杂多维度分析任务（APQR、偏差调查等）。参数 plan_json 为 JSON 字符串，包含 tables_needed（schema/table/key_filter/aggregate_hint）。",
+            parameters={
+                "plan_json": {
+                    "type": "string",
+                    "description": "结构化数据定位计划 JSON，格式: {\"tables_needed\": [{\"schema\":\"...\",\"table\":\"...\",\"why\":\"...\",\"key_filter\":\"...\",\"aggregate_hint\":\"...\"}], \"output_sections\": [...], \"task_id\": \"...\"}",
+                },
+            },
+            handler=handler,
+            required=["plan_json"],
+        )

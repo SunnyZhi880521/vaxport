@@ -10,9 +10,9 @@
 
 | 平台 | 下载 |
 |------|------|
-| macOS | [Vaxport_1.3.5_aarch64.dmg](https://github.com/SunnyZhi880521/vaxport/releases/latest) |
-| Windows | [Vaxport_1.3.5_x64_en-US.msi](https://github.com/SunnyZhi880521/vaxport/releases/latest) |
-| Linux | [Vaxport_1.3.5_amd64.deb](https://github.com/SunnyZhi880521/vaxport/releases/latest) |
+| macOS | [Vaxport_1.4.0_aarch64.dmg](https://github.com/SunnyZhi880521/vaxport/releases/latest) |
+| Windows | [Vaxport_1.4.0_x64_en-US.msi](https://github.com/SunnyZhi880521/vaxport/releases/latest) |
+| Linux | [Vaxport_1.4.0_amd64.deb](https://github.com/SunnyZhi880521/vaxport/releases/latest) |
 
 > 最新版本和安装包可在 [GitHub Releases](https://github.com/SunnyZhi880521/vaxport/releases) 页面下载。
 
@@ -514,9 +514,25 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA
     analog_production, analog_quality, analog_coldchain,
     analog_warehouse, analog_equipment, analog_hr, analog_pv
 GRANT SELECT ON TABLES TO vlm_reader;
+
+-- 安装 pgvector 扩展（语义检索必需）
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- 创建语义记忆存储 schema（vlm_reader 可写，业务 schema 仍只读）
+CREATE SCHEMA IF NOT EXISTS vaxport_rag;
+GRANT USAGE ON SCHEMA vaxport_rag TO vlm_reader;
+GRANT CREATE ON SCHEMA vaxport_rag TO vlm_reader;
+GRANT ALL ON ALL TABLES IN SCHEMA vaxport_rag TO vlm_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA vaxport_rag
+    GRANT ALL ON TABLES TO vlm_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA vaxport_rag
+    GRANT ALL ON SEQUENCES TO vlm_reader;
+GRANT CREATE ON DATABASE myappdb TO vlm_reader;
 ```
 
 > **Windows 用户**：`psql -U postgres -d myappdb`，输入密码后执行同样 SQL。
+
+> **权限说明**：vlm_reader 对业务 schema（analog_*）只有 SELECT 权限，不会修改业务数据。对 vaxport_rag schema 有 CREATE/INSERT 权限，用于存储语义记忆（历史分析案例和异常模式），方便后续查询复用。
 
 退出 psql：
 
@@ -833,20 +849,24 @@ agent:
 ```
 终端交互: textual (TUI)
     ↓
-Orchestrator: 6 Agent 编排 (📊统计 📝报告 ⚖️合规 🔍检索 🔔预警 🤖通用)
+Orchestrator: 4 Agent 编排 (📊统计 📝报告 ⚖️合规 🔍检索 🤖通用)
+    + SKILL 匹配注入 + Semantic Memory 语义召回
     ↓
 Agent 引擎: ReAct 循环 (Think → Act → Observe) + Handoff 接力
     + PRE-HOOK 自动规划 + POST-HOOK 自动质检
+    + Deep Research 三阶段流水线 (scan→聚合采集→跨表综合)
+    + GuardRails: per-section 限图 + 全局兜底 + 死循环检测
     ↓
 LLM 后端: OpenAI 兼容统一接口 → DashScope (deepseek-v4-flash) / Ollama (本地)
     + 自动熔断切换 (云端故障 → 本地)
     + Ctrl+P 动态模型选择 (通过 /v1/models API)
     ↓
 工具执行: Schema 自动发现 + 17 内置工具 + 多数据库支持 (Ctrl+D 切换)
+    + generate_chart section 参数 (per-section 限图追踪)
     ↓
-数据层: PostgreSQL 多库 + pgvector (RAG 文档检索) + 百炼 text-embedding-v4 / qwen-vl-max
+数据层: PostgreSQL 多库 + pgvector (RAG 文档检索 + Semantic Memory) + 百炼 text-embedding-v4 / qwen-vl-max
     ↓
-SKILL 兼容: ~/.agents/skills/ (三级模型)
+SKILL 兼容: ~/.agents/skills/ (三级模型) + per-section 收敛约束
     ↓
 会话管理: JSON 持久化 + 审计日志 (GMP 合规)
 ```
@@ -1037,6 +1057,30 @@ GeneralAgent → [HANDOFF:analyze_reporter]
 - **上下文压缩**：超 75% 窗口触发 · 保留最近 3 轮对话
 
 ## 版本历史
+
+### v1.4.0 (2026-06-09)
+
+- **Deep Research 三阶段流水线**: scan→聚合采集→跨表综合，将串行 ReAct 逐条查表改为并发聚合SQL（5行摘要替代5000行原始数据），步数从15-18降到5-7
+- **Semantic Memory 语义召回层**: pgvector + DashScope embedding 存储+召回历史分析案例，与 SKILL 程序性记忆互补（参考什么 vs 怎么做）
+- **SKILL per-section 限图机制**: generate_chart 新增 section 参数，GuardRails 按章节追踪图表数量（每章节最多5张），解决同一SKILL不同运行图表数量差异巨大的问题
+- **SKILL 收敛约束**: 3个 SKILL（偏差分析/过程能力/稳定性评估）增加图表上限和动态收敛规则
+- **GuardRails 三层限图**: per-section 限图（5张/章节）→ 全局限图（15张兜底）→ 死循环检测
+- **新增 5 个领域 SKILL**（总计 8 个）:
+  - `oos-oot-investigation`: OOS/OOT 分阶段调查（FDA OOS指南 Phase I/II + Western Electric/Nelson规则）
+  - `cleaning-validation`: 清洁验证限度计算与评估（PDE/ADE/MACO + 最差产品选择 + borderline pass识别）
+  - `change-control-assessment`: 变更控制风险评估（ICH Q9 + FMEA/RPN + 残余风险分析）
+  - `cold-chain-assessment`: 冷链温度偏移影响评估（MKT计算 + Arrhenius + 稳定性对照）
+  - `trend-spc-warning`: SPC统计过程控制（WE 8条规则 + Nelson补充 + 趋势vs漂移区分）
+- **模拟数据补充**（6张新表，152条记录）:
+  - `oos_records`（40条）: 实验室55%/生产45%，含假阳性、复检通过、拒收
+  - `oot_records`（20条）: alert 60%/action 40%，含误报评估
+  - `change_control_records`（30条）: 设备/工艺/物料/包装四类，含超期和拒绝
+  - `change_control_risk_assessment`（20条）: FMEA评估，RPN分布低/中/高
+  - `cleaning_validation_results`（30条）: pass 87%/fail 13%，含borderline pass
+  - `cleaning_validation_limits`（12条）: PDE/ADE/0.001剂量三种方法
+- **SKILL 测试评估**: 5题×3次运行，SKILL要素命中率100%，结构一致性100%
+- **Database.execute_simple**: 新增 DDL/INSERT 执行方法，修复 SemanticMemory 和 documents.py 的 RAG schema 创建
+- **Agent logger**: agent.py 新增 logging 模块，修复 _try_deep_research 的 NameError
 
 ### v1.3.5 (2026-06-06)
 

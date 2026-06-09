@@ -356,6 +356,18 @@ class Database:
                 "row_count": len(rows),
             }
 
+    def execute_simple(self, query_template: str, params: tuple = (),
+                      timeout_ms: int = 60000) -> None:
+        """执行 DDL/INSERT 等无返回行的语句。"""
+        conn = self._pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SET LOCAL statement_timeout = %s", (str(timeout_ms),))
+                cur.execute(query_template, params)
+            conn.commit()
+        finally:
+            self._pool.putconn(conn)
+
     def execute_safe_select(
         self, schema: str, table: str, columns: list[str] = None,
         filters: dict = None, limit: int = 1000

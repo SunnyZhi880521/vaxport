@@ -130,6 +130,9 @@ class App:
         if self.skills:
             self.tools.register_skill_scripts()
 
+        # 注册 Deep Research 工具
+        self.tools.register_deep_research()
+
         # ── Schema 目录：持久化元数据缓存 ──
         from vaxport.schema_catalog import SchemaCatalog
         self.schema_catalog = SchemaCatalog()
@@ -888,13 +891,16 @@ class App:
                 "**关键规则**: trend/comparison 的 x/groups 必须覆盖数据库中的**全部时间段/分组**（即使值为 0 也必须包含），禁止只传入有数据的月份。例如按月统计时，数据从 2024-01 到 2026-06，x 必须含全部 30 个月，对应 y 为 0 的也要写 0。"
                 "**重要**: 返回的 file_path 是当前系统的绝对路径，引用时必须原样使用，**严禁**做任何格式转换或路径修改。"
                 "**如果返回 error，禁止编造路径！在回答中如实告知用户图表生成失败及原因。**"
+                "\n**section 参数**: 必须填写当前分析步骤名称（如'偏差总览'、'帕累托分析'、'CAPA关联分析'、'趋势分析'、'结论与建议'），用于追踪每章节图表数量。每章节最多5张图表。"
             ),
             parameters={
                 "data": {"type": "string", "description": "图表数据JSON，格式严格按 chart_type 对应结构"},
                 "chart_type": {"type": "string", "description": "图表类型: trend/control/pareto/heatmap/comparison"},
                 "options": {"type": "string", "description": "图表选项JSON (可选)，如 '{\"title\":\"趋势图\"}'"},
+                "section": {"type": "string", "description": "当前分析步骤名称，如'偏差总览'、'帕累托分析'。每章节最多5张图。section为空时不计入章节限图，只计入全局15张上限。"},
             },
-            handler=lambda data, chart_type, options="{}":
+            required=["data", "chart_type"],
+            handler=lambda data, chart_type, options="{}", section="":
                 _safe_generate_chart(_generate_chart, data, chart_type, options),
         )
 

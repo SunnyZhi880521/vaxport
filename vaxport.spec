@@ -26,10 +26,13 @@ a = Analysis(
     binaries=[],
     datas=[
         ('src/vaxport/tui/style.tcss', 'vaxport/tui/'),
+        ('src/vaxport/skills', 'vaxport/skills'),
     ],
     hiddenimports=[
         # psycopg2
         'psycopg2', 'psycopg2.extras', 'psycopg2.pool', 'psycopg2.sql',
+        # pgvector (vector extension support)
+        'pgvector',
         # matplotlib
         'matplotlib', 'matplotlib.backends.backend_agg',
         'matplotlib.font_manager', 'matplotlib.pyplot', 'matplotlib.ticker',
@@ -61,6 +64,10 @@ a = Analysis(
         'sqlparse', 'sqlparse.sql', 'sqlparse.tokens', 'sqlparse.keywords',
         # yaml
         'yaml',
+        # vaxport new modules (v1.4.0)
+        'vaxport.deep_research', 'vaxport.semantic_memory',
+        'vaxport.skill_engine', 'vaxport.skill_validator',
+        'vaxport.ear.skill_monitor',
         # web framework
         'uvicorn', 'fastapi', 'starlette',
         'fastapi.middleware.cors', 'fastapi.responses',

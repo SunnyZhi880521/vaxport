@@ -21,6 +21,21 @@ Thumbs.db
 # Project specific
 *.log
 ~/.vaxport/
+data/research_cache/
+tests/with_skill/
+tests/baseline/
+
+# Session temp files (planning-with-files)
+findings.md
+progress.md
+task_plan.md
+
+# Agent test output (not for repo)
+APQR_*.md
+capa_*.md
+
+# OpenSpec (temporary change tracking)
+openspec/
 
 # Claude Code
 .claude/

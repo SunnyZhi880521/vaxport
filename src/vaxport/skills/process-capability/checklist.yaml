@@ -1,0 +1,50 @@
+# process-capability SKILL 自动化检查清单
+
+name: process-capability
+version: 1.1.0
+
+required_steps:
+  - name: data_preparation
+    description: 收集目标参数的历史批次数据
+    keywords: ["批次", "数据", "查询", "样本量", "均值", "标准差", "CV"]
+
+  - name: control_check
+    description: 确认数据处于统计受控状态
+    keywords: ["控制图", "受控", "失控", "异常", "Western Electric"]
+
+  - name: cpk_calculation
+    description: 计算 Cp/Cpk 过程能力指数
+    keywords: ["Cpk", "Cp", "过程能力", "能力指数"]
+
+  - name: trend_analysis
+    description: 检查时间趋势
+    keywords: ["趋势", "回归", "漂移", "变化"]
+
+required_sections:
+  - name: "数据概览"
+    aliases: ["概览", "数据总览", "基础统计", "数据统计"]
+  - name: "受控状态"
+    aliases: ["控制图", "受控", "失控", "控制状态", "SPC"]
+  - name: "过程能力"
+    aliases: ["Cpk", "Cp", "能力指数", "过程能力指数"]
+  - name: "结论"
+    aliases: ["结论", "建议", "综合评价", "判定"]
+
+required_charts:
+  - "控制图"
+
+forbidden_patterns:
+  - pattern: "假设.*规格[限标准]"
+    message: "禁止假设规格限"
+  - pattern: "通常.*[规格标准].*是"
+    message: "禁止假设行业标准"
+  - pattern: "过程能力完全没问题"
+    message: "禁止过于绝对的结论"
+
+judgment_standards:
+  cpk:
+    excellent: 1.67
+    sufficient: 1.33
+    acceptable: 1.0
+    poor_below: 1.0
+  min_sample_size: 20

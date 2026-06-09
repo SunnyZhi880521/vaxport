@@ -39,10 +39,11 @@ class TrajectoryBuffer:
 class SOPDistiller:
     """SOP蒸馏器 — 持续积累+阈值触发"""
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: Optional[str] = None, semantic_memory=None):
         if db_path is None:
             db_path = str(Path.home() / ".vaxport" / "ear_sop.db")
         self.db_path = db_path
+        self._semantic_memory = semantic_memory  # SemanticMemory 实例（可选）
 
         # 可配置参数
         self.trigger_threshold = 50  # 累积多少条触发蒸馏
@@ -258,7 +259,38 @@ class SOPDistiller:
         conn.close()
 
     def retrieve_sop(self, task_description: str, task_type: str) -> Optional[SOP]:
-        """检索匹配的SOP（orchestrator调用）"""
+        """检索匹配的SOP（orchestrator调用）。
+        语义匹配优先路径：similarity > 0.75 时直接返回语义匹配结果。
+        关词匹配兜底：现有逻辑不变。"""
+        # 语义匹配优先
+        if self._semantic_memory:
+            similar_cases = self._semantic_memory.search_similar_cases(
+                task_description, top_k=1, task_type=task_type,
+            )
+            if similar_cases:
+                best = similar_cases[0]
+                sim = best.get("similarity", 0.0)
+                if sim >= 0.75:
+                    logger.info(f"SOPDistiller: 语义匹配命中 (sim={sim:.2f})")
+                    # 将语义匹配案例转换为 SOP 格式
+                    tables = best.get("tables_used", "")
+                    if isinstance(tables, str):
+                        try:
+                            tables = json.loads(tables)
+                        except Exception:
+                            tables = [tables] if tables else []
+                    steps = [{"action": "semantic_reference", "tables": tables}]
+                    return SOP(
+                        id=f"semantic_{best.get('id', '')}",
+                        task_type=task_type,
+                        trigger_pattern=best.get("query_summary", ""),
+                        steps=steps,
+                        success_count=1,
+                        confidence=sim,
+                        last_used=time.time(),
+                    )
+
+        # 关词匹配兜底
         conn = sqlite3.connect(self.db_path)
         cursor = conn.execute(
             """SELECT id, task_type, trigger_pattern, steps, success_count, confidence, last_used

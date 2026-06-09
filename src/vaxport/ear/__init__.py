@@ -8,6 +8,7 @@ from vaxport.ear.feedback_loop import (
 )
 from vaxport.ear.guard_rails import GuardRails, RegulationAction, StepRecord, ValidationResult
 from vaxport.ear.router_optimizer import RouterOptimizer, RoutingSuggestion
+from vaxport.ear.skill_monitor import SkillMonitor
 from vaxport.ear.sop_distiller import SOP, SOPDistiller
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "SOP",
     "RouterOptimizer",
     "RoutingSuggestion",
+    "SkillMonitor",
 ]

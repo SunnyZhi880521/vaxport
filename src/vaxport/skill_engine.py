@@ -1,13 +1,17 @@
 """SKILL 引擎 — 匹配、加载、注入到 Agent system prompt"""
 
 import re
+import sys
 from pathlib import Path
 from typing import Optional
 
 import yaml
 
 
-SKILLS_DIR = Path(__file__).parent / "skills"
+if getattr(sys, "frozen", False):
+    SKILLS_DIR = Path(sys._MEIPASS) / "vaxport" / "skills"
+else:
+    SKILLS_DIR = Path(__file__).parent / "skills"
 
 
 class Skill:
@@ -15,7 +19,9 @@ class Skill:
 
     def __init__(self, skill_dir: Path):
         self.dir = skill_dir
+        self.dir_name = skill_dir.name
         self.name = skill_dir.name
+        self.description = ""
         self.metadata: dict = {}
         self.content: str = ""
         self.checklist: dict = {}
@@ -35,6 +41,8 @@ class Skill:
             if fm_match:
                 self.metadata = yaml.safe_load(fm_match.group(1)) or {}
                 self.content = fm_match.group(2)
+                self.name = self.metadata.get("name", self.dir_name)
+                self.description = self.metadata.get("description", "")
             else:
                 self.content = raw
 
@@ -46,6 +54,18 @@ class Skill:
             ) or {}
 
         self._loaded = True
+
+    @property
+    def short_desc(self) -> str:
+        """简短描述（用于列表显示）"""
+        return self.description[:80] + "..." if len(self.description) > 80 else self.description
+
+    @property
+    def availability_badge(self) -> str:
+        """SKILL 状态标记"""
+        if self.checklist:
+            return "🔧 含检查清单"
+        return "📋 领域指导"
 
     def matches(self, user_input: str) -> float:
         """计算用户输入与此 SKILL 的匹配度
@@ -136,19 +156,48 @@ class SkillEngine:
             skill.load()
         return skill
 
-    def list_skills(self) -> list[dict]:
+    def load_all(self):
+        """加载所有 SKILL（兼容 SkillRegistry 接口）"""
+        self._discover()
+
+    def list_skills(self) -> list[Skill]:
         """列出所有已加载的 SKILL"""
         self._discover()
         result = []
         for name, skill in self._skills.items():
             skill.load()
-            result.append({
-                "name": skill.metadata.get("name", name),
-                "description": skill.metadata.get("description", ""),
-                "keywords": skill.metadata.get("keywords", []),
-                "domain": skill.metadata.get("domain", ""),
-            })
+            result.append(skill)
         return result
+
+    def get_skill_detail(self, name: str) -> str:
+        """获取 SKILL 的完整内容"""
+        skill = self._skills.get(name)
+        if not skill:
+            return f"未找到 SKILL: {name}"
+        skill.load()
+        return skill.content or f"SKILL {name} 无详细内容。"
+
+    def build_system_prompt_section(self) -> str:
+        """构建注入 system prompt 的 SKILL 描述部分"""
+        self._discover()
+        if not self._skills:
+            return ""
+
+        lines = ["\n## 可用领域技能 (SKILL)"]
+        for name, skill in sorted(self._skills.items()):
+            skill.load()
+            skill_name = skill.name or name
+            desc = skill.description or "无描述"
+            keywords = ", ".join(skill.metadata.get("keywords", [])[:5])
+            lines.append(f"- **{skill_name}**: {desc}")
+            if keywords:
+                lines.append(f"  关键词: {keywords}")
+        lines.append("\n系统会根据用户问题自动匹配合适的 SKILL 并注入领域知识。")
+        return "\n".join(lines)
+
+    def get_executable_scripts(self) -> list[tuple[str, dict]]:
+        """获取所有可执行 Python 脚本（兼容旧接口，vaxport SKILL 无可执行脚本）"""
+        return []
 
     @property
     def count(self) -> int:

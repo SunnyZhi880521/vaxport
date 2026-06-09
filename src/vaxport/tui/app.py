@@ -910,12 +910,14 @@ class VaxportApp(App):
             with Vertical(id="sidebar"):
                 yield Static(" 数据库表", id="sidebar-header")
                 yield Tree("", id="sidebar-content")
+                yield Static("", id="ear-panel")
                 yield Static("", id="shortcuts-panel")
 
     def on_mount(self) -> None:
         self._update_header()
         self._update_prompt_info()
         self._update_shortcuts()
+        self._update_ear_panel()
         self.query_one("#user_input", ChatInput).focus()
         self._show_welcome()
         self._populate_sidebar()
@@ -958,6 +960,71 @@ class VaxportApp(App):
             panel.update(self._build_shortcuts_text())
         except Exception:
             pass
+
+    def _update_ear_panel(self) -> None:
+        """刷新 EAR 状态面板（轨迹/反馈/SOP/路由）"""
+        try:
+            panel = self.query_one("#ear-panel", Static)
+        except Exception:
+            return
+        if not self.orchestrator:
+            panel.update("[dim]EAR 未初始化[/]")
+            return
+        try:
+            stats = self.orchestrator.get_ear_stats()
+            if not stats:
+                panel.update("[dim]暂无 EAR 数据[/]")
+                return
+            lines = []
+            # 任务轨迹
+            traj = stats.get("trajectory", {})
+            total = traj.get("total", 0)
+            rate = traj.get("success_rate", 0)
+            dur = traj.get("avg_duration", 0)
+            tok = traj.get("avg_tokens", 0)
+            lines.append("[bold #BD93F9]任务轨迹[/]")
+            lines.append(f"  总数  {total}")
+            lines.append(f"  成功率 {rate*100:.0f}%")
+            lines.append(f"  平均耗时 {dur:.1f}s")
+            lines.append(f"  平均Token {tok:.0f}")
+            # SOP蒸馏
+            sop = stats.get("sop", {})
+            if sop:
+                buf = sop.get("buffer_count", 0)
+                thr = sop.get("trigger_threshold", 1)
+                nxt = sop.get("next_trigger_in", 0)
+                sop_n = sop.get("sop_count", 0)
+                conf = sop.get("avg_confidence", 0)
+                lines.append("")
+                lines.append("[bold #BD93F9]SOP蒸馏[/]")
+                lines.append(f"  累积 {buf}/{thr}")
+                lines.append(f"  下次触发 还差{nxt}条")
+                lines.append(f"  已生成 {sop_n}个")
+                lines.append(f"  平均置信度 {conf*100:.0f}%")
+                filled = int(buf / thr * 10)
+                lines.append(f"  [{'#'*filled}{'.'*(10-filled)}]")
+            # 用户反馈
+            fb = stats.get("feedback", {})
+            if fb:
+                lines.append("")
+                lines.append("[bold #BD93F9]用户反馈[/]")
+                lines.append(f"  总数 {fb.get('total', 0)}  显式 {fb.get('explicit', 0)}")
+                lines.append(f"  [#50FA7B]满意 {fb.get('satisfied', 0)}[/]  [#FF5555]不满意 {fb.get('unsatisfied', 0)}[/]")
+            # Agent路由
+            routing = stats.get("routing", {})
+            if routing:
+                lines.append("")
+                lines.append("[bold #BD93F9]Agent路由[/]")
+                for agent, data in routing.items():
+                    if isinstance(data, dict):
+                        cnt = data.get("count", 0)
+                        sr = data.get("success_rate", 0)
+                        lines.append(f"  {agent} {cnt}次 {sr*100:.0f}%")
+                    else:
+                        lines.append(f"  {agent}: {data}")
+            panel.update("\n".join(lines))
+        except Exception as e:
+            panel.update(f"[dim]EAR 数据加载失败: {e}[/]")
 
     def on_key(self, event) -> None:
         """Esc 取消计划确认 / 取消执行"""
@@ -1893,6 +1960,7 @@ class VaxportApp(App):
                                 plan_mode=self._plan_mode, history=history,
                                 cancel_event=self._execution_cancel)
         self._last_result = result
+        self._update_ear_panel()
         # 停止 MarkdownStream，刷新最后的内容
         callbacks.finalize_stream()
         elapsed_ms = int((time.time() - start_time) * 1000)

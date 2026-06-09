@@ -553,6 +553,19 @@ class Orchestrator:
         self._skill_engine = SkillEngine()  # SKILL引擎（v1.4.0）
         self._semantic_memory = SemanticMemory(tool_registry.db) if tool_registry.db and tool_registry.db.is_connected else None  # 语义记忆
 
+    def get_ear_stats(self) -> dict:
+        """获取 EAR 综合统计（供 TUI/GUI 展示）"""
+        try:
+            return {
+                "trajectory": self._feedback_loop.get_trajectory_stats(),
+                "feedback": self._feedback_loop.get_feedback_stats(),
+                "routing": self._feedback_loop.get_routing_stats(),
+                "sop": self._sop_distiller.get_status(),
+            }
+        except Exception as e:
+            logger.warning(f"获取EAR统计异常: {e}")
+            return {}
+
     def set_memory_context(self, memory_text: str):
         """注入跨会话反馈记忆到所有 Agent"""
         self._memory_context = memory_text
@@ -746,13 +759,16 @@ class Orchestrator:
                 logger.warning(f"语义记忆存储异常: {e}")
 
         # EAR路由优化建议（不影响当前执行，仅供前端展示参考）
-        routing_suggestion = self._router_optimizer.suggest_agent(user_query, task_type)
-        if routing_suggestion:
-            result["routing_suggestion"] = {
-                "agent": routing_suggestion.agent,
-                "confidence": routing_suggestion.confidence,
-                "reason": routing_suggestion.reason,
-            }
+        try:
+            routing_suggestion = self._router_optimizer.suggest_agent(user_query, task_type)
+            if routing_suggestion:
+                result["routing_suggestion"] = {
+                    "agent": routing_suggestion.agent,
+                    "confidence": routing_suggestion.confidence,
+                    "reason": routing_suggestion.reason,
+                }
+        except Exception as e:
+            logger.warning(f"EAR路由建议异常: {e}")
 
         # 记录 TaskAssigner 的分类理由
         reason = route.get("reason", "")

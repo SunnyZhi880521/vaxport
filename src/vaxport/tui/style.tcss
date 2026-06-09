@@ -117,13 +117,6 @@ Horizontal {
     height: auto;
 }
 
-/* ── 进度点 ── */
-#progress-dots {
-    color: #6272A4;
-    height: 1;
-    margin: 0 1 0 1;
-}
-
 /* ── 轮次间隔分隔线 ── */
 .divider {
     color: #44475A;
@@ -201,6 +194,18 @@ Horizontal {
     max-height: 100%;
     padding: 0 1;
     background: #21222C;
+    scrollbar-size-vertical: 1;
+}
+
+/* ── EAR 状态面板 ── */
+
+#ear-panel {
+    height: 16;
+    padding: 1 1;
+    background: #21222C;
+    color: #A4A4B4;
+    border-top: solid #44475A;
+    overflow-y: scroll;
     scrollbar-size-vertical: 1;
 }
 

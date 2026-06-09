@@ -11,7 +11,7 @@ from vaxport.db import Database, create_database, MultiDatabase, create_multi_da
 from vaxport.tools import ToolRegistry
 from vaxport.agent import Agent, ProgressCallbacks
 from vaxport.orchestrator import Orchestrator
-from vaxport.skills import SkillRegistry
+from vaxport.skill_engine import SkillEngine
 from vaxport.session import Session, write_audit_log, build_audit_entry
 from vaxport import ui
 
@@ -41,7 +41,7 @@ class App:
         self.db: Database = None
         self.tools: ToolRegistry = None
         self.orchestrator: Orchestrator = None
-        self.skills: SkillRegistry = None
+        self.skills: SkillEngine = None
         self.session: Session = None
         self.debug_mode = False
         self._last_result: dict = {}  # 缓存最近一次查询结果，供 /status 使用
@@ -49,8 +49,8 @@ class App:
     def setup(self, resume_session: str = None, quiet: bool = False):
         """初始化所有组件"""
         self._quiet = quiet
-        # 1. SKILL
-        self.skills = SkillRegistry()
+        # 1. SKILL (vaxport 领域 SKILL)
+        self.skills = SkillEngine()
         self.skills.load_all()
 
         # 2. LLM

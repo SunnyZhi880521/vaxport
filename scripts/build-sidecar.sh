@@ -15,7 +15,11 @@ pyinstaller vaxport.spec --noconfirm --clean
 # 确定目标三元组
 detect_target() {
     case "$(uname -s)" in
-        Darwin)  echo "x86_64-apple-darwin" ;;  # 注: Apple Silicon 也报 x86_64 给 Tauri sidecar
+        Darwin)
+            case "$(uname -m)" in
+                arm64|aarch64) echo "aarch64-apple-darwin" ;;
+                *)             echo "x86_64-apple-darwin" ;;
+            esac ;;
         Linux)   echo "x86_64-unknown-linux-gnu" ;;
         MINGW*|MSYS*|CYGWIN*)  echo "x86_64-pc-windows-msvc" ;;
         *)       echo "unknown-target" ;;

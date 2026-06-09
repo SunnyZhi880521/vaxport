@@ -1081,6 +1081,11 @@ GeneralAgent → [HANDOFF:analyze_reporter]
 - **SKILL 测试评估**: 5题×3次运行，SKILL要素命中率100%，结构一致性100%
 - **Database.execute_simple**: 新增 DDL/INSERT 执行方法，修复 SemanticMemory 和 documents.py 的 RAG schema 创建
 - **Agent logger**: agent.py 新增 logging 模块，修复 _try_deep_research 的 NameError
+- **TUI EAR 状态面板**: 侧边栏新增固定高度可滚动 EAR 状态面板（轨迹统计/SOP蒸馏/反馈/路由优化）
+- **GUI 用户名修复**: 用户名从后端 API 获取（`getpass.getuser()`），不再依赖 Tauri Shell `whoami`
+- **SKILL 统一**: 删除旧 `skills.py`，统一使用 `SkillEngine`；`tools.py` 类型注解同步修正
+- **GUI AgentType 对齐**: `doc_search` → `document_search`，删除不存在的 `alert_monitor`
+- **死代码清理**: routes.py 移除无效的 `auto_plan/plan_confirm/auto_review` 赋值；style.tcss 移除无对应 widget 的 `#progress-dots`
 
 ### v1.3.5 (2026-06-06)
 

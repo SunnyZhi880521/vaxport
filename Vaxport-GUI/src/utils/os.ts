@@ -1,22 +1,20 @@
-import { Command } from '@tauri-apps/plugin-shell';
+import { api } from "../lib/api";
 
 /**
- * 获取系统用户名（异步版本，适用于 Tauri 环境）
- * 通过执行系统命令 whoami 获取当前用户名
+ * 获取系统用户名
+ * 优先从后端 API 获取，回退到默认值
  */
 export async function getSystemUsernameAsync(): Promise<string> {
   try {
-    // 在 Tauri 环境中使用 shell 插件执行 whoami
-    const output = await Command.create('whoami').execute();
-    if (output.code === 0 && output.stdout) {
-      return output.stdout.trim();
+    const status = await api.getStatus();
+    if (status && typeof status.username === "string" && status.username) {
+      return status.username;
     }
   } catch (error) {
-    console.warn('通过 shell 获取用户名失败:', error);
+    console.warn("通过 API 获取用户名失败:", error);
   }
 
-  // 回退到默认值
-  return '用户';
+  return "用户";
 }
 
 /**

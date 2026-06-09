@@ -20,7 +20,7 @@ export const api = {
   getSchemas: () => request<Record<string, unknown>>("/api/schemas"),
 
   // Skills
-  getSkills: () => request<unknown[]>("/api/skills"),
+  getSkills: () => request<{ skills: Array<{ name: string; description: string; dir_name?: string; has_checklist?: boolean; keywords?: string[] }>; count: number }>("/api/skills"),
 
   // Models
   getModels: () => request<Record<string, unknown>>("/api/models"),

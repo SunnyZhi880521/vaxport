@@ -88,6 +88,7 @@ async def get_status():
 
     return {
         "status": "running",
+        "username": _get_username(),
         "model": llm.active_model if llm else "",
         "backend": llm.active_backend if llm else "",
         "backends": backend_status,
@@ -137,7 +138,17 @@ async def get_skills():
     """列出已加载 SKILL"""
     if _state["app"] is None or _state["app"].skills is None:
         return {"skills": [], "count": 0}
-    skills = _state["app"].skills.list_skills()
+    skill_objs = _state["app"].skills.list_skills()
+    skills = [
+        {
+            "name": s.name,
+            "description": s.description,
+            "dir_name": s.dir_name,
+            "has_checklist": bool(s.checklist),
+            "keywords": s.metadata.get("keywords", []),
+        }
+        for s in skill_objs
+    ]
     return {"skills": skills, "count": len(skills)}
 
 
@@ -445,9 +456,6 @@ def _reinit_after_config_change(cfg, req: ConfigUpdateRequest):
             # 更新 orchestrator 中的 LLM 客户端和配置
             if app.orchestrator:
                 app.orchestrator.set_llm_client(app.llm)
-                app.orchestrator.auto_plan = cfg.auto_plan
-                app.orchestrator.plan_confirm = cfg.plan_confirm
-                app.orchestrator.auto_review = cfg.auto_review
                 # 同步 agent temperatures/models
                 for agent_name in ["task_assigner", "general", "analyze_reporter", "quality_supervision", "document_search"]:
                     temp = cfg.get_agent_temperature(agent_name)
@@ -787,6 +795,14 @@ def _get_version() -> str:
         return __version__
     except ImportError:
         return "2.0.0"
+
+
+def _get_username() -> str:
+    try:
+        import getpass
+        return getpass.getuser()
+    except Exception:
+        return "用户"
 
 
 def _build_schema_tree(db_name: str, db) -> dict:

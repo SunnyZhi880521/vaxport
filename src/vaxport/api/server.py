@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from vaxport.config import load_config
 from vaxport.cli import App
 
-BUILD_VERSION = "2026-06-05 16:08:58"
+BUILD_VERSION = "dev"
 
 # ── 全局状态（模块级，使用可变容器以确保跨模块引用正确）─────
 # 注意：必须使用 dict/list 等可变容器，因为 lifespan 会重新赋值 _app。

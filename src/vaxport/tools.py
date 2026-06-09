@@ -6,13 +6,13 @@ from typing import Any, Callable, Optional
 
 from vaxport.db import Database
 from vaxport.ear import GuardRails
-from vaxport.skills import SkillRegistry
+from vaxport.skill_engine import SkillEngine
 
 
 class ToolRegistry:
     """工具注册表，管理所有 LLM 可调用的 Tool"""
 
-    def __init__(self, db: Optional[Database] = None, skill_registry: Optional[SkillRegistry] = None):
+    def __init__(self, db: Optional[Database] = None, skill_registry: Optional[SkillEngine] = None):
         self.db = db
         self.skill_registry = skill_registry
         self._tools: dict[str, dict] = {}  # tool_name → tool_definition

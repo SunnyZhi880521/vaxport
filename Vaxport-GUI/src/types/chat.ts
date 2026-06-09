@@ -5,15 +5,13 @@ export type AgentType =
   | "general"
   | "analyze_reporter"
   | "quality_supervision"
-  | "doc_search"
-  | "alert_monitor";
+  | "document_search";
 
 export const AGENT_LABELS: Record<AgentType, string> = {
   general: "🤖 通用 Agent",
   analyze_reporter: "📊 统计分析 Agent",
   quality_supervision: "⚖️ 质量监督 Agent",
-  doc_search: "🔍 文档检索 Agent",
-  alert_monitor: "🔔 预警监控 Agent",
+  document_search: "🔍 文档检索 Agent",
 };
 
 export interface ToolCall {

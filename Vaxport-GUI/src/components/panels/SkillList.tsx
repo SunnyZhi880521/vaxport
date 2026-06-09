@@ -6,31 +6,10 @@ import { useAppStore } from "../../stores/appStore";
 interface SkillInfo {
   name: string;
   description: string;
-  tier?: string;
+  dir_name?: string;
+  has_checklist?: boolean;
+  keywords?: string[];
 }
-
-const MOCK_SKILLS: SkillInfo[] = [
-  {
-    name: "vaccine_protocol",
-    description: "兽用疫苗试验方案审核与设计",
-    tier: "专业",
-  },
-  {
-    name: "data_analysis",
-    description: "数据分析通用技能",
-    tier: "通用",
-  },
-  {
-    name: "compliance_check",
-    description: "GMP 合规检查",
-    tier: "专业",
-  },
-  {
-    name: "report_generation",
-    description: "报告生成模板",
-    tier: "通用",
-  },
-];
 
 export function SkillList() {
   const { backendOnline } = useAppStore();
@@ -41,18 +20,22 @@ export function SkillList() {
     if (backendOnline) {
       loadSkills();
     } else {
-      setSkills(MOCK_SKILLS);
+      setSkills([]);
     }
   }, [backendOnline]);
 
   const loadSkills = async () => {
     setLoading(true);
     try {
-      await api.getSkills();
-      setSkills(MOCK_SKILLS);
+      const response = await api.getSkills();
+      if (response && response.skills) {
+        setSkills(response.skills);
+      } else {
+        setSkills([]);
+      }
     } catch (err) {
       console.error("Failed to load skills:", err);
-      setSkills(MOCK_SKILLS);
+      setSkills([]);
     } finally {
       setLoading(false);
     }
@@ -67,11 +50,13 @@ export function SkillList() {
 
       {loading ? (
         <div className="py-4 text-center text-xs text-text-muted">加载中...</div>
+      ) : skills.length === 0 ? (
+        <div className="py-4 text-center text-xs text-text-muted">暂无 SKILL</div>
       ) : (
         <div className="space-y-2">
           {skills.map((skill) => (
             <div
-              key={skill.name}
+              key={skill.dir_name || skill.name}
               className="rounded-lg border border-border-subtle bg-bg-tertiary p-3"
             >
               <div className="mb-1 flex items-center gap-2">
@@ -79,9 +64,9 @@ export function SkillList() {
                 <span className="text-sm font-medium text-text-primary">
                   {skill.name}
                 </span>
-                {skill.tier && (
+                {skill.has_checklist && (
                   <span className="rounded bg-accent-purple/15 px-1.5 py-0.5 text-xs text-accent-purple">
-                    {skill.tier}
+                    含检查清单
                   </span>
                 )}
               </div>
